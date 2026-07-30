@@ -23,14 +23,17 @@
 - 每日最多 3 次决策，买入、卖出、转换、不操作均计数；单纯净值更新、确认、到账、盈亏快照不计数。
 - 15:00 或以前提交交易，申请交易日为当天；15:00 后提交交易，申请交易日为下一个交易日。
 - 买入 T+1 确认份额；卖出确认后资金在 T+1 且 15:00 后到账。
+- 持仓每日明细只展示当前持有基金；记录从买入申请交易日开始，不为已清仓基金保留前端入口。
+- 持仓每日明细基于资产快照日期生成，关联当日或最近可用基金净值，字段包括净值、净值涨跌幅、份额、成本、市值、未实现盈亏和收益率。
 - 真实行情仍由 Codex 查询后通过接口写入，本工具 MVP 不自动联网抓行情。
 
 ## 分页口径
 
 - 列表接口默认使用 `page` / `pageSize` 分页，返回 `{ items, pagination }`。
 - `pageSize` 默认 10，最大 100；页码越界时返回最后一页。
-- 已分页接口包括：`/api/positions`、`/api/orders`、`/api/decisions`、`/api/pnl`、`/api/account/cash-ledger`、`/api/account/snapshots`。
+- 已分页接口包括：`/api/positions`、`/api/positions/:fundCode/history`、`/api/orders`、`/api/decisions`、`/api/pnl`、`/api/account/cash-ledger`、`/api/account/snapshots`。
 - 页面表格默认显示最新 10 条；操作页的决策、订单、现金流水独立翻页，账户页的现金流水和资产快照独立翻页，盈亏页的盈亏快照独立翻页。
+- 账户页“持仓明细”每行有“详情”按钮，请求 `/api/positions/:fundCode/history?page=1&pageSize=20` 后在弹窗展示该基金最近持仓日明细。
 
 ## 部署口径
 

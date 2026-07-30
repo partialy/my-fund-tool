@@ -68,6 +68,7 @@ const labelCashType = (value) => ({
   refund: '退款'
 }[String(value || '').toLowerCase()] || value || '--');
 const fundLabel = (row) => [pick(row, 'fundCode', 'fund_code', 'code'), pick(row, 'fundName', 'fund_name', 'name')].filter(Boolean).join(' ') || '--';
+const fundCodeOf = (row) => pick(row, 'fundCode', 'fund_code', 'code') || '';
 %>
 <!doctype html>
 <html lang="zh-CN">
@@ -130,11 +131,13 @@ const fundLabel = (row) => [pick(row, 'fundCode', 'fund_code', 'code'), pick(row
                 <th class="num">市值</th>
                 <th class="num">盈亏</th>
                 <th class="num">收益率</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <% if (positions.length) { %>
                 <% positions.forEach((row) => { %>
+                  <% const code = fundCodeOf(row); %>
                   <tr>
                     <td><strong><%= fundLabel(row) %></strong></td>
                     <td class="num"><%= scaledFrom(row, ['availableShares', 'available_shares', 'shares'], ['availableSharesInt', 'available_shares_int', 'sharesInt', 'shares_int'], 4) %></td>
@@ -144,10 +147,19 @@ const fundLabel = (row) => [pick(row, 'fundCode', 'fund_code', 'code'), pick(row
                     <td class="num"><%= moneyFrom(row, ['marketValue', 'market_value', 'value'], ['marketValueCents', 'market_value_cents', 'valueCents', 'value_cents']) %></td>
                     <td class="num <%= tone(pick(row, 'pnl', 'unrealizedPnl', 'unrealized_pnl')) %>"><%= moneyFrom(row, ['pnl', 'unrealizedPnl', 'unrealized_pnl'], ['pnlCents', 'pnl_cents', 'unrealizedPnlCents', 'unrealized_pnl_cents']) %></td>
                     <td class="num"><%= pctFrom(row, ['pnlRate', 'pnl_rate', 'returnRate', 'return_rate'], ['pnlPpm', 'pnl_ppm', 'returnPpm', 'return_ppm']) %></td>
+                    <td>
+                      <button
+                        type="button"
+                        class="row-link"
+                        data-position-history-button
+                        data-fund-code="<%= code %>"
+                        data-fund-name="<%= fundLabel(row) %>"
+                      >详情</button>
+                    </td>
                   </tr>
                 <% }) %>
               <% } else { %>
-                <tr><td class="empty-row" colspan="8">暂无持仓明细。</td></tr>
+                <tr><td class="empty-row" colspan="9">暂无持仓明细。</td></tr>
               <% } %>
             </tbody>
           </table>
@@ -227,7 +239,149 @@ const fundLabel = (row) => [pick(row, 'fundCode', 'fund_code', 'code'), pick(row
           <%- include('partials/pagination', { pagination: snapshotPagination, param: 'snapshotPage', pageSizeParam: 'snapshotPageSize', label: '资产快照', query }) %>
         </article>
       </section>
+
+      <div class="position-history-modal" data-position-history-modal hidden>
+        <button class="modal-backdrop" type="button" data-position-history-close aria-label="关闭"></button>
+        <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="position-history-title">
+          <header class="modal-head">
+            <div>
+              <p class="eyebrow">持仓走势</p>
+              <h2 id="position-history-title" data-position-history-title>基金每日明细</h2>
+            </div>
+            <button class="modal-close" type="button" data-position-history-close aria-label="关闭">×</button>
+          </header>
+          <p class="modal-status" data-position-history-status>请选择一只持仓基金。</p>
+          <div class="table-wrap modal-table-wrap">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th class="num">单位净值</th>
+                  <th class="num">涨跌幅</th>
+                  <th class="num">份额</th>
+                  <th class="num">成本</th>
+                  <th class="num">市值</th>
+                  <th class="num">盈亏</th>
+                  <th class="num">收益率</th>
+                  <th>来源</th>
+                </tr>
+              </thead>
+              <tbody data-position-history-rows>
+                <tr><td class="empty-row" colspan="9">暂无数据。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </main>
   </div>
+  <script>
+    (() => {
+      const modal = document.querySelector('[data-position-history-modal]');
+      const title = document.querySelector('[data-position-history-title]');
+      const status = document.querySelector('[data-position-history-status]');
+      const rows = document.querySelector('[data-position-history-rows]');
+      const buttons = document.querySelectorAll('[data-position-history-button]');
+      const closeButtons = document.querySelectorAll('[data-position-history-close]');
+
+      if (!modal || !title || !status || !rows) return;
+
+      const fmtNumber = (value, digits = 2) => {
+        const n = Number(value);
+        return Number.isFinite(n)
+          ? n.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+          : '--';
+      };
+      const fmtMoney = (value) => `¥${fmtNumber(value, 2)}`;
+      const fmtNav = (value) => fmtNumber(value, 4);
+      const fmtRate = (value, ppm) => {
+        const raw = value ?? (ppm === null || ppm === undefined ? null : Number(ppm) / 1000000);
+        const n = Number(raw);
+        return Number.isFinite(n) ? `${fmtNumber(n * 100, 2)}%` : '--';
+      };
+      const toneClass = (value) => {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n === 0) return 'muted';
+        return n > 0 ? 'positive' : 'negative';
+      };
+      const escapeHtml = (value) => String(value ?? '--').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+
+      const setEmpty = (message) => {
+        rows.innerHTML = `<tr><td class="empty-row" colspan="9">${escapeHtml(message)}</td></tr>`;
+      };
+
+      const openModal = () => {
+        modal.hidden = false;
+        document.body.classList.add('modal-open');
+      };
+
+      const closeModal = () => {
+        modal.hidden = true;
+        document.body.classList.remove('modal-open');
+      };
+
+      const renderRows = (items) => {
+        if (!items.length) {
+          setEmpty('暂无每日明细。');
+          return;
+        }
+
+        rows.innerHTML = items.map((item) => {
+          const pnlTone = toneClass(item.unrealizedPnl);
+          const navTone = toneClass(item.navChangePpm);
+          return `
+            <tr>
+              <td>${escapeHtml(item.snapshotDate || item.navDate)}</td>
+              <td class="num">${fmtNav(item.nav)}</td>
+              <td class="num ${navTone}">${fmtRate(item.navChangeRate, item.navChangePpm)}</td>
+              <td class="num">${fmtNumber(item.shares, 4)}</td>
+              <td class="num">${fmtMoney(item.cost)}</td>
+              <td class="num">${fmtMoney(item.marketValue)}</td>
+              <td class="num ${pnlTone}">${fmtMoney(item.unrealizedPnl)}</td>
+              <td class="num ${pnlTone}">${fmtRate(item.returnRate, item.returnPpm)}</td>
+              <td>${escapeHtml(item.navSource || '--')}</td>
+            </tr>
+          `;
+        }).join('');
+      };
+
+      const loadHistory = async (button) => {
+        const fundCode = button.dataset.fundCode;
+        const fundName = button.dataset.fundName || fundCode;
+        if (!fundCode) return;
+
+        title.textContent = fundName;
+        status.textContent = '正在加载每日净值与盈亏明细...';
+        setEmpty('加载中...');
+        openModal();
+
+        try {
+          const response = await fetch(`/api/positions/${encodeURIComponent(fundCode)}/history?page=1&pageSize=20`);
+          if (!response.ok) throw new Error(`请求失败：${response.status}`);
+          const payload = await response.json();
+          const items = Array.isArray(payload.items) ? payload.items : [];
+          renderRows(items);
+          status.textContent = items.length ? `已显示最新 ${items.length} 条持仓日明细。` : '当前持仓暂无历史明细。';
+        } catch (error) {
+          setEmpty('加载失败，请稍后重试。');
+          status.textContent = error.message || '加载失败。';
+        }
+      };
+
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => loadHistory(button));
+      });
+      closeButtons.forEach((button) => button.addEventListener('click', closeModal));
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !modal.hidden) closeModal();
+      });
+    })();
+  </script>
 </body>
 </html>

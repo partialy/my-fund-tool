@@ -37,6 +37,7 @@ sudo systemctl status pm2-yixi.service
 - `GET /api/today?date=YYYY-MM-DD`
 - `GET /api/account/balance`
 - `GET /api/positions?page=1&pageSize=10`
+- `GET /api/positions/:fundCode/history?page=1&pageSize=20`
 - `GET /api/orders?page=1&pageSize=10`
 - `GET /api/decisions?page=1&pageSize=10`
 - `GET /api/pnl?page=1&pageSize=10`
@@ -53,5 +54,7 @@ sudo systemctl status pm2-yixi.service
 - `POST /api/import/legacy`
 
 列表接口默认分页，返回 `{ items, pagination }`，`pageSize` 默认 10，最大 100。页面表格默认展示最新 10 条，并通过分页条手动翻页。
+
+持仓每日明细只对当前持有基金开放，从买入申请交易日开始记录，按资产快照日期关联当日或最近可用基金净值，返回每日净值、涨跌幅、份额、成本、市值、未实现盈亏和收益率。账户页的“持仓明细”表格提供“详情”按钮，可弹窗查看该基金最新 20 条明细。
 
 MVP 中真实行情仍由 Codex 查询后写入接口，工具负责账本、交易规则、页面展示和历史迁移。

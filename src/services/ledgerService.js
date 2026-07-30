@@ -103,6 +103,14 @@ function pageMeta(result) {
   return Array.isArray(result) ? null : result?.pagination ?? null;
 }
 
+function ratioPpm(numerator, denominator) {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return null;
+  }
+
+  return Math.round((numerator * 1000000) / denominator);
+}
+
 export function createLedgerService(db) {
   function get(sql, params = {}) {
     return plain(db.prepare(sql).get(params));
@@ -1301,6 +1309,94 @@ export function createLedgerService(db) {
     });
   }
 
+  function getPositionHistory(input = {}) {
+    const account = requireAccount(input.accountId ?? input.account_id);
+    const fundCode = input.fundCode ?? input.fund_code ?? input.code;
+    if (!fundCode) {
+      throw new Error('Fund code is required.');
+    }
+
+    const position = get(
+      `SELECT *
+       FROM positions
+       WHERE account_id = :accountId AND fund_code = :fundCode`,
+      { accountId: account.id, fundCode }
+    );
+    if (!position) {
+      throw new Error(`Position not found: ${fundCode}`);
+    }
+
+    return listRows({
+      input,
+      selectSql: `SELECT
+         s.snapshot_date,
+         sp.fund_code,
+         f.name AS fund_name,
+         sp.shares_int,
+         sp.cost_cents,
+         sp.nav_int,
+         sp.market_value_cents,
+         sp.unrealized_pnl_cents,
+         fn.nav_date,
+         fn.source AS nav_source,
+         prev.nav_int AS previous_nav_int
+       FROM snapshot_positions sp
+       JOIN account_snapshots s ON s.id = sp.snapshot_id
+       JOIN funds f ON f.code = sp.fund_code
+       LEFT JOIN fund_navs fn
+         ON fn.id = (
+           SELECT current_nav.id
+           FROM fund_navs current_nav
+           WHERE current_nav.fund_code = sp.fund_code
+             AND current_nav.nav_date <= s.snapshot_date
+           ORDER BY current_nav.nav_date DESC
+           LIMIT 1
+         )
+       LEFT JOIN fund_navs prev
+         ON prev.id = (
+           SELECT previous_nav.id
+           FROM fund_navs previous_nav
+           WHERE previous_nav.fund_code = sp.fund_code
+             AND previous_nav.nav_date < fn.nav_date
+           ORDER BY previous_nav.nav_date DESC
+           LIMIT 1
+         )
+       WHERE s.account_id = :accountId
+         AND sp.fund_code = :fundCode
+       ORDER BY s.snapshot_date DESC, s.id DESC`,
+      countSql: `SELECT COUNT(*) AS totalItems
+       FROM snapshot_positions sp
+       JOIN account_snapshots s ON s.id = sp.snapshot_id
+       WHERE s.account_id = :accountId
+         AND sp.fund_code = :fundCode`,
+      params: { accountId: account.id, fundCode },
+      mapRow: (row) => {
+        const navChangePpm = row.previous_nav_int === null
+          ? null
+          : ratioPpm(row.nav_int - row.previous_nav_int, row.previous_nav_int);
+        const returnPpm = ratioPpm(row.unrealized_pnl_cents, row.cost_cents);
+
+        return {
+          ...row,
+          snapshotDate: row.snapshot_date,
+          fundCode: row.fund_code,
+          fundName: row.fund_name,
+          nav: row.nav_int === null ? null : intToNav(row.nav_int),
+          navDate: row.nav_date ?? row.snapshot_date,
+          navChangePpm,
+          navChangeRate: navChangePpm === null ? null : navChangePpm / 1000000,
+          navSource: row.nav_source,
+          shares: intToShares(row.shares_int),
+          cost: centsToMoney(row.cost_cents),
+          marketValue: centsToMoney(row.market_value_cents),
+          unrealizedPnl: centsToMoney(row.unrealized_pnl_cents),
+          returnPpm,
+          returnRate: returnPpm === null ? null : returnPpm / 1000000
+        };
+      }
+    });
+  }
+
   function getAccountSummary(input = {}) {
     const account = requireAccount(input.accountId ?? input.account_id);
     const balance = getAccountBalance(account.id);
@@ -1639,6 +1735,7 @@ export function createLedgerService(db) {
     getActionViewModel,
     getAccountSummary,
     listPositions,
+    getPositionHistory,
     listOrders,
     listDecisions,
     listPnlEntries,

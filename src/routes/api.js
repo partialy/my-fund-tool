@@ -6,6 +6,7 @@ const LEDGER_METHODS = {
   balance: ['getAccountBalance', 'getBalance', 'getBalanceSummary'],
   cashAdjustment: ['createCashAdjustment', 'recordCashAdjustment', 'adjustCash'],
   positions: ['listPositions', 'getPositions'],
+  positionHistory: ['getPositionHistory', 'listPositionHistory'],
   orders: ['listOrders', 'getOrders'],
   decisions: ['listDecisions', 'getDecisions'],
   pnl: ['getPnl', 'listPnl', 'listPnlEntries', 'getPnlEntries', 'getProfitAndLoss'],
@@ -69,6 +70,14 @@ export function createApiRouter({ ledger, db, importLegacyData } = {}) {
 
   router.get('/positions', asyncHandler(async (request, response) => {
     const data = await callLedger(ledger, LEDGER_METHODS.positions, paginatedQueryPayload(request));
+    sendSuccessResponse(response, data);
+  }));
+
+  router.get('/positions/:fundCode/history', asyncHandler(async (request, response) => {
+    const data = await callLedger(ledger, LEDGER_METHODS.positionHistory, {
+      ...paginatedQueryPayload(request),
+      fundCode: request.params.fundCode,
+    });
     sendSuccessResponse(response, data);
   }));
 

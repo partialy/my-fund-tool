@@ -222,3 +222,93 @@ test('counted decisions are limited to three per local date', async () => {
     await fixture.cleanup();
   }
 });
+
+test('position history starts at buy trade date and calculates nav change and pnl rate', async () => {
+  const fixture = await createLedgerFixture('position-history');
+
+  try {
+    await call(fixture.ledger, ['writeFundNav', 'recordFundNav'], {
+      code: 'A001',
+      fundName: '测试基金A',
+      navDate: '2026-01-01',
+      nav: '1.0000',
+      source: '测试净值源',
+    });
+    await call(fixture.ledger, ['writeFundNav', 'recordFundNav'], {
+      code: 'A001',
+      fundName: '测试基金A',
+      navDate: '2026-01-02',
+      nav: '1.1000',
+      source: '测试净值源',
+    });
+    await call(fixture.ledger, ['writeFundNav', 'recordFundNav'], {
+      code: 'A001',
+      fundName: '测试基金A',
+      navDate: '2026-01-03',
+      nav: '1.2100',
+      source: '测试净值源',
+    });
+
+    const decision = await call(fixture.ledger, ['recordDecision', 'createDecision'], {
+      decisionNo: '20260101-001',
+      decisionDate: '2026-01-01',
+      submittedAt: '2026-01-01T14:30:00+08:00',
+      action: 'buy',
+      fundCode: 'A001',
+      fundName: '测试基金A',
+      amount: '1100.00',
+      reason: '15点前买入，下一日按买入交易日净值确认',
+      countsDaily: true,
+    });
+
+    await call(fixture.ledger, ['submitOrder', 'createOrder', 'recordOrder'], {
+      orderNo: '20260101-001',
+      decisionId: decision.id,
+      submittedAt: '2026-01-01T14:30:00+08:00',
+      side: 'buy',
+      fundCode: 'A001',
+      fundName: '测试基金A',
+      amount: '1100.00',
+      tradeDate: '2026-01-02',
+      fee: '0.00',
+    });
+    await call(fixture.ledger, ['confirmOrder', 'confirmBuyOrder'], {
+      orderNo: '20260101-001',
+      confirmDate: '2026-01-03',
+      settleDate: '2026-01-03',
+      nav: '1.1000',
+    });
+    await call(fixture.ledger, ['createSnapshot', 'recordSnapshot', 'writeSnapshot'], {
+      snapshotDate: '2026-01-02',
+      note: '补买入交易日净值快照',
+    });
+    await call(fixture.ledger, ['createSnapshot', 'recordSnapshot', 'writeSnapshot'], {
+      snapshotDate: '2026-01-03',
+      note: '次日持仓快照',
+    });
+
+    const history = await call(fixture.ledger, ['getPositionHistory', 'listPositionHistory'], {
+      fundCode: 'A001',
+      paginated: true,
+      page: 1,
+      pageSize: 10,
+    });
+
+    assert.equal(history.items.length, 2);
+    assert.equal(history.items[0].snapshotDate, '2026-01-03');
+    assert.equal(history.items[1].snapshotDate, '2026-01-02');
+    assert.equal(history.items[1].nav, 1.1);
+    assert.equal(history.items[1].navChangePpm, 100000);
+    assert.equal(history.items[1].shares, 1000);
+    assert.equal(history.items[1].marketValue, 1100);
+    assert.equal(history.items[1].unrealizedPnl, 0);
+    assert.equal(history.items[1].returnPpm, 0);
+    assert.equal(history.items[0].nav, 1.21);
+    assert.equal(history.items[0].navChangePpm, 100000);
+    assert.equal(history.items[0].marketValue, 1210);
+    assert.equal(history.items[0].unrealizedPnl, 110);
+    assert.equal(history.items[0].returnPpm, 100000);
+  } finally {
+    await fixture.cleanup();
+  }
+});

@@ -39,6 +39,10 @@ a {
   text-decoration: none;
 }
 
+button {
+  font: inherit;
+}
+
 .shell {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
@@ -243,6 +247,7 @@ h2 {
   color: var(--blue);
   font-weight: 700;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .soft-button {
@@ -480,6 +485,89 @@ tbody tr:hover {
   color: var(--soft);
 }
 
+.modal-open {
+  overflow: hidden;
+}
+
+.position-history-modal[hidden] {
+  display: none;
+}
+
+.position-history-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(20, 31, 42, 0.34);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(1040px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: var(--radius);
+  background: rgba(250, 253, 255, 0.82);
+  box-shadow: 0 28px 80px rgba(28, 43, 58, 0.24);
+  backdrop-filter: blur(24px) saturate(165%);
+  -webkit-backdrop-filter: blur(24px) saturate(165%);
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.modal-close {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(47, 111, 149, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  border-color: rgba(47, 111, 149, 0.36);
+  background: rgba(236, 246, 251, 0.88);
+}
+
+.modal-status {
+  margin: 8px 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.modal-table-wrap {
+  max-height: min(560px, calc(100vh - 210px));
+  overflow: auto;
+}
+
+.history-table {
+  min-width: 960px;
+}
+
 @media (max-width: 920px) {
   .metrics-grid,
   .metrics-grid.compact,
@@ -532,5 +620,19 @@ tbody tr:hover {
 
   table {
     min-width: 650px;
+  }
+
+  .position-history-modal {
+    padding: 12px;
+  }
+
+  .modal-panel {
+    max-height: calc(100vh - 24px);
+    padding: 14px;
+  }
+
+  .modal-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

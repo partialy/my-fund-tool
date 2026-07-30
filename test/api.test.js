@@ -234,3 +234,131 @@ test('market quote endpoint records index quotes without requiring a fund', asyn
     await fixture.cleanup();
   }
 });
+
+test('position history endpoint returns current holding daily details', async () => {
+  const fixture = await createAppFixture('position-history');
+
+  try {
+    const { ledger } = fixture.app.locals;
+    ledger.adjustCash({
+      type: 'deposit',
+      amount: '2000.00',
+      occurredAt: '2026-01-01T09:00:00+08:00',
+      note: '测试资金',
+    });
+    ledger.writeFundNav({
+      code: 'A001',
+      fundName: '测试基金A',
+      navDate: '2026-01-01',
+      nav: '1.0000',
+      source: '测试净值源',
+    });
+    ledger.writeFundNav({
+      code: 'A001',
+      fundName: '测试基金A',
+      navDate: '2026-01-02',
+      nav: '1.1000',
+      source: '测试净值源',
+    });
+    const decision = ledger.recordDecision({
+      decisionNo: '20260101-001',
+      decisionDate: '2026-01-01',
+      submittedAt: '2026-01-01T14:30:00+08:00',
+      action: 'buy',
+      fundCode: 'A001',
+      fundName: '测试基金A',
+      amount: '1100.00',
+      reason: '测试买入',
+    });
+    ledger.createOrder({
+      orderNo: '20260101-001',
+      decisionId: decision.id,
+      submittedAt: '2026-01-01T14:30:00+08:00',
+      side: 'buy',
+      fundCode: 'A001',
+      fundName: '测试基金A',
+      amount: '1100.00',
+      tradeDate: '2026-01-02',
+      fee: '0.00',
+    });
+    ledger.confirmOrder({
+      orderNo: '20260101-001',
+      confirmDate: '2026-01-03',
+      settleDate: '2026-01-03',
+      nav: '1.1000',
+    });
+    ledger.createSnapshot({ snapshotDate: '2026-01-02' });
+
+    const response = await request(fixture.app)
+      .get('/api/positions/A001/history?page=1&pageSize=10')
+      .expect(200);
+    const data = unwrapBody(response);
+
+    assert.equal(data.items.length, 1);
+    assert.equal(data.items[0].fundCode, 'A001');
+    assert.equal(data.items[0].fundName, '测试基金A');
+    assert.equal(data.items[0].snapshotDate, '2026-01-02');
+    assert.equal(data.items[0].nav, 1.1);
+    assert.equal(data.items[0].navChangePpm, 100000);
+    assert.equal(data.items[0].marketValue, 1100);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('account page exposes position history detail controls', async () => {
+  const fixture = await createAppFixture('account-position-history');
+
+  try {
+    const { ledger } = fixture.app.locals;
+    ledger.adjustCash({
+      type: 'deposit',
+      amount: '2000.00',
+      occurredAt: '2026-01-01T09:00:00+08:00',
+      note: '测试资金',
+    });
+    ledger.writeFundNav({
+      code: 'A001',
+      fundName: '测试基金A',
+      navDate: '2026-01-02',
+      nav: '1.1000',
+      source: '测试净值源',
+    });
+    const decision = ledger.recordDecision({
+      decisionDate: '2026-01-01',
+      submittedAt: '2026-01-01T14:30:00+08:00',
+      action: 'buy',
+      fundCode: 'A001',
+      fundName: '测试基金A',
+      amount: '1100.00',
+      reason: '测试买入',
+    });
+    ledger.createOrder({
+      orderNo: '20260101-001',
+      decisionId: decision.id,
+      submittedAt: '2026-01-01T14:30:00+08:00',
+      side: 'buy',
+      fundCode: 'A001',
+      fundName: '测试基金A',
+      amount: '1100.00',
+      tradeDate: '2026-01-02',
+      fee: '0.00',
+    });
+    ledger.confirmOrder({
+      orderNo: '20260101-001',
+      confirmDate: '2026-01-03',
+      settleDate: '2026-01-03',
+      nav: '1.1000',
+    });
+    ledger.createSnapshot({ snapshotDate: '2026-01-02' });
+
+    const response = await request(fixture.app).get('/account').expect(200);
+    const $ = cheerio.load(response.text);
+
+    assert.equal($('[data-position-history-button][data-fund-code="A001"]').length, 1);
+    assert.equal($('[data-position-history-modal]').length, 1);
+    assert.match(response.text, /\/api\/positions\/.*\/history/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
