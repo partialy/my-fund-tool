@@ -365,7 +365,11 @@ const fundCodeOf = (row) => pick(row, 'fundCode', 'fund_code', 'code') || '';
           const response = await fetch(`/api/positions/${encodeURIComponent(fundCode)}/history?page=1&pageSize=20`);
           if (!response.ok) throw new Error(`请求失败：${response.status}`);
           const payload = await response.json();
-          const items = Array.isArray(payload.items) ? payload.items : [];
+          const items = Array.isArray(payload?.data?.items)
+            ? payload.data.items
+            : Array.isArray(payload?.items)
+              ? payload.items
+              : [];
           renderRows(items);
           status.textContent = items.length ? `已显示最新 ${items.length} 条持仓日明细。` : '当前持仓暂无历史明细。';
         } catch (error) {

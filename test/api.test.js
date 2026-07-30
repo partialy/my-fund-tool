@@ -358,6 +358,7 @@ test('account page exposes position history detail controls', async () => {
     assert.equal($('[data-position-history-button][data-fund-code="A001"]').length, 1);
     assert.equal($('[data-position-history-modal]').length, 1);
     assert.match(response.text, /\/api\/positions\/.*\/history/);
+    assert.match(response.text, /payload\?\.data\?\.items/);
   } finally {
     await fixture.cleanup();
   }
