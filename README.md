@@ -21,7 +21,9 @@ pnpm dev
 
 PM2 应用名：`fund-sim-tool`
 
-开机自启服务：`pm2-yixi.service`
+PM2 运行用户：`root`
+
+开机自启服务：`pm2-root.service`
 
 常用命令：
 
@@ -29,7 +31,7 @@ PM2 应用名：`fund-sim-tool`
 /www/server/nodejs/v22.22.3/bin/pm2 status fund-sim-tool
 /www/server/nodejs/v22.22.3/bin/pm2 restart fund-sim-tool --update-env
 /www/server/nodejs/v22.22.3/bin/pm2 logs fund-sim-tool --lines 50
-sudo systemctl status pm2-yixi.service
+systemctl status pm2-root.service
 ```
 
 ## 核心接口

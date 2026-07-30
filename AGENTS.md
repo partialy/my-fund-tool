@@ -45,7 +45,8 @@
 - 宝塔服务器部署目录：`/www/wwwroot/node-service/fund-sim-tool`。
 - PM2 应用名：`fund-sim-tool`。
 - PM2 命令路径：`/www/server/nodejs/v22.22.3/bin/pm2`。
-- PM2 开机自启 unit：`pm2-yixi.service`，使用 `pm2 resurrect --no-daemon` 前台模式，避免 systemd 读取用户目录 PID 文件失败。
+- PM2 运行用户：`root`，用于让 root 终端和宝塔面板直接看到服务。
+- PM2 开机自启 unit：`pm2-root.service`。
 - 服务启动配置：`ecosystem.config.cjs`。
 - 生产数据库路径：`/www/wwwroot/node-service/fund-sim-tool/data/fund-sim.sqlite`。
 
