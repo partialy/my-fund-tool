@@ -25,6 +25,8 @@ PM2 运行用户：`root`
 
 开机自启服务：`pm2-root.service`
 
+服务器 Git 代理：`http://192.168.9.100:10809`
+
 常用命令：
 
 ```bash
@@ -32,6 +34,8 @@ PM2 运行用户：`root`
 /www/server/nodejs/v22.22.3/bin/pm2 restart fund-sim-tool --update-env
 /www/server/nodejs/v22.22.3/bin/pm2 logs fund-sim-tool --lines 50
 systemctl status pm2-root.service
+git config --global http.proxy http://192.168.9.100:10809
+git config --global https.proxy http://192.168.9.100:10809
 ```
 
 ## 核心接口

@@ -47,6 +47,7 @@
 - PM2 命令路径：`/www/server/nodejs/v22.22.3/bin/pm2`。
 - PM2 运行用户：`root`，用于让 root 终端和宝塔面板直接看到服务。
 - PM2 开机自启 unit：`pm2-root.service`。
+- 服务器访问 GitHub 可用 HTTP 代理：`http://192.168.9.100:10809`；SOCKS 代理端口：`192.168.9.100:10808`。
 - 服务启动配置：`ecosystem.config.cjs`。
 - 生产数据库路径：`/www/wwwroot/node-service/fund-sim-tool/data/fund-sim.sqlite`。
 
