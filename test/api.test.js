@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -67,6 +67,66 @@ async function seedDecisionRows(app, count) {
       .expect((res) => assert.ok([200, 201].includes(res.status), res.text));
     unwrapBody(response);
   }
+}
+
+function seedConfirmedPosition(ledger, {
+  code = 'A001',
+  fundName = '测试基金A',
+  amount = '1000.00',
+  orderNo = '20260101-001',
+  tradeDate = '2026-01-02',
+  confirmDate = '2026-01-03',
+  buyNav = '1.0000',
+  latestDate = '2026-01-03',
+  latestNav = '1.1000',
+} = {}) {
+  ledger.adjustCash({
+    type: 'deposit',
+    amount: '2000.00',
+    occurredAt: '2026-01-01T09:00:00+08:00',
+    note: '测试资金',
+  });
+  ledger.writeFundNav({
+    code,
+    fundName,
+    navDate: tradeDate,
+    nav: buyNav,
+    source: '测试买入净值源',
+  });
+  const decision = ledger.recordDecision({
+    decisionDate: '2026-01-01',
+    submittedAt: '2026-01-01T14:30:00+08:00',
+    action: 'buy',
+    fundCode: code,
+    fundName,
+    amount,
+    reason: '测试买入',
+  });
+  ledger.createOrder({
+    orderNo,
+    decisionId: decision.id,
+    submittedAt: '2026-01-01T14:30:00+08:00',
+    side: 'buy',
+    fundCode: code,
+    fundName,
+    amount,
+    tradeDate,
+    fee: '0.00',
+  });
+  ledger.confirmOrder({
+    orderNo,
+    confirmDate,
+    settleDate: confirmDate,
+    nav: buyNav,
+  });
+  ledger.writeFundNav({
+    code,
+    fundName,
+    navDate: latestDate,
+    nav: latestNav,
+    source: '测试最新净值源',
+  });
+  ledger.createSnapshot({ snapshotDate: latestDate });
 }
 
 test('cash adjustment endpoint applies deposit, withdraw, and correction', async () => {
@@ -233,6 +293,36 @@ test('market quote endpoint records index quotes without requiring a fund', asyn
   } finally {
     await fixture.cleanup();
   }
+});
+
+test('positions endpoint and pages show holding return rates', async () => {
+  const fixture = await createAppFixture('position-return-rates');
+
+  try {
+    seedConfirmedPosition(fixture.app.locals.ledger);
+
+    const positions = unwrapBody(
+      await request(fixture.app).get('/api/positions?page=1&pageSize=10').expect(200),
+    );
+    assert.equal(positions.items[0].fundCode, 'A001');
+    assert.equal(positions.items[0].returnPpm, 100000);
+    assert.equal(positions.items[0].returnRate, 0.1);
+
+    for (const path of ['/', '/account']) {
+      const response = await request(fixture.app).get(path).expect(200);
+      const $ = cheerio.load(response.text);
+      assert.equal($('td.num.positive').filter((_, element) => $(element).text().trim() === '10.00%').length, 1);
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('stylesheet uses red for gains and green for losses', async () => {
+  const css = await readFile(new URL('../src/public/app.css', import.meta.url), 'utf8');
+
+  assert.match(css, /\.positive\s*{\s*color:\s*var\(--red\);\s*}/);
+  assert.match(css, /\.negative\s*{\s*color:\s*var\(--green\);\s*}/);
 });
 
 test('position history endpoint returns current holding daily details', async () => {

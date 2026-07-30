@@ -51,7 +51,7 @@ const pctFrom = (obj, keys, ppmKeys = []) => {
   const raw = pick(obj, ...keys);
   if (raw !== undefined) return pct(raw);
   const ppm = pick(obj, ...ppmKeys);
-  return pct(ppm === undefined ? undefined : Number(ppm) / 10000);
+  return pct(ppm === undefined ? undefined : Number(ppm) / 1000000);
 };
 const tone = (value) => {
   const n = Number(value);
@@ -146,7 +146,7 @@ const fundCodeOf = (row) => pick(row, 'fundCode', 'fund_code', 'code') || '';
                     <td class="num"><%= scaledFrom(row, ['nav', 'latestNav', 'latest_nav', 'lastNav', 'last_nav'], ['navInt', 'nav_int', 'latestNavInt', 'latest_nav_int', 'lastNavInt', 'last_nav_int'], 4) %></td>
                     <td class="num"><%= moneyFrom(row, ['marketValue', 'market_value', 'value'], ['marketValueCents', 'market_value_cents', 'valueCents', 'value_cents']) %></td>
                     <td class="num <%= tone(pick(row, 'pnl', 'unrealizedPnl', 'unrealized_pnl')) %>"><%= moneyFrom(row, ['pnl', 'unrealizedPnl', 'unrealized_pnl'], ['pnlCents', 'pnl_cents', 'unrealizedPnlCents', 'unrealized_pnl_cents']) %></td>
-                    <td class="num"><%= pctFrom(row, ['pnlRate', 'pnl_rate', 'returnRate', 'return_rate'], ['pnlPpm', 'pnl_ppm', 'returnPpm', 'return_ppm']) %></td>
+                    <td class="num <%= tone(pick(row, 'pnlRate', 'pnl_rate', 'returnRate', 'return_rate', 'pnlPpm', 'pnl_ppm', 'returnPpm', 'return_ppm')) %>"><%= pctFrom(row, ['pnlRate', 'pnl_rate', 'returnRate', 'return_rate'], ['pnlPpm', 'pnl_ppm', 'returnPpm', 'return_ppm']) %></td>
                     <td>
                       <button
                         type="button"

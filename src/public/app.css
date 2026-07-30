@@ -376,11 +376,11 @@ tbody tr:hover {
 }
 
 .positive {
-  color: var(--green);
+  color: var(--red);
 }
 
 .negative {
-  color: var(--red);
+  color: var(--green);
 }
 
 .muted {

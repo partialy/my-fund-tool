@@ -1297,15 +1297,26 @@ export function createLedgerService(db) {
         FROM positions
         WHERE account_id = :accountId`,
       params: { accountId: account.id },
-      mapRow: (position) => ({
-        ...position,
-        shares: intToShares(position.shares_int),
-        cost: centsToMoney(position.cost_cents),
-        lastNav: position.last_nav_int === null ? null : intToNav(position.last_nav_int),
-        marketValue: centsToMoney(position.market_value_cents),
-        unrealizedPnlCents: position.market_value_cents - position.cost_cents,
-        unrealizedPnl: centsToMoney(position.market_value_cents - position.cost_cents)
-      })
+      mapRow: (position) => {
+        const unrealizedPnlCents = position.market_value_cents - position.cost_cents;
+        const returnPpm = ratioPpm(unrealizedPnlCents, position.cost_cents);
+
+        return {
+          ...position,
+          fundCode: position.fund_code,
+          fundName: position.fund_name,
+          shares: intToShares(position.shares_int),
+          cost: centsToMoney(position.cost_cents),
+          lastNav: position.last_nav_int === null ? null : intToNav(position.last_nav_int),
+          marketValue: centsToMoney(position.market_value_cents),
+          unrealizedPnlCents,
+          unrealizedPnl: centsToMoney(unrealizedPnlCents),
+          pnlPpm: returnPpm,
+          pnlRate: returnPpm === null ? null : returnPpm / 1000000,
+          returnPpm,
+          returnRate: returnPpm === null ? null : returnPpm / 1000000
+        };
+      }
     });
   }
 
