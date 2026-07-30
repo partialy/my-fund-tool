@@ -1,0 +1,234 @@
+<%
+const vm = typeof data !== 'undefined' && data ? data : (typeof viewModel !== 'undefined' && viewModel ? viewModel : {});
+const pick = (obj, ...keys) => {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+  }
+  return undefined;
+};
+const arr = (value) => Array.isArray(value) ? value : [];
+const operations = arr(pick(vm, 'operations', 'entries', 'activity'));
+const decisions = arr(pick(vm, 'decisions', 'actions'));
+const orders = Array.isArray(vm) ? vm : arr(pick(vm, 'orders', 'orderRows'));
+const cashRows = arr(pick(vm, 'cashLedger', 'cashEntries', 'cashRows'));
+const decisionPagination = pick(vm, 'decisionPagination', 'decisionsPagination', 'actionPagination') || {};
+const orderPagination = pick(vm, 'orderPagination', 'ordersPagination') || {};
+const cashPagination = pick(vm, 'cashPagination', 'cashLedgerPagination') || {};
+const rows = operations.length ? operations : decisions.length ? decisions : orders;
+const fmtNum = (value, digits = 2) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : String(value);
+};
+const money = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? `¥${fmtNum(n, 2)}` : String(value);
+};
+const moneyFrom = (obj, keys, centKeys = []) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return money(raw);
+  const cents = pick(obj, ...centKeys);
+  return money(cents === undefined ? undefined : Number(cents) / 100);
+};
+const scaledFrom = (obj, keys, intKeys = [], digits = 4) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return fmtNum(raw, digits);
+  const intValue = pick(obj, ...intKeys);
+  return fmtNum(intValue === undefined ? undefined : Number(intValue) / 10000, digits);
+};
+const labelAction = (value) => ({ buy: '买入', sell: '卖出', hold: '观望', convert: '转换', switch: '转换', cash: '现金', nav: '净值' }[String(value || '').toLowerCase()] || value || '--');
+const labelStatus = (value) => ({
+  recorded: '已记录',
+  ordered: '已下单',
+  submitted: '已提交',
+  confirmed: '已确认',
+  settled: '已到账',
+  cancelled: '已取消',
+  pending: '待处理'
+}[String(value || '').toLowerCase()] || value || '--');
+const labelCashType = (value) => ({
+  deposit: '入金',
+  withdraw: '出金',
+  correction: '余额修正',
+  buy_order: '买入扣款',
+  sell_settlement: '卖出到账',
+  import: '历史导入',
+  fee: '手续费',
+  refund: '退款'
+}[String(value || '').toLowerCase()] || value || '--');
+const totalFrom = (meta, fallback) => pick(meta, 'totalItems', 'total_items', 'total') ?? fallback;
+const fundLabel = (row) => [pick(row, 'fundCode', 'fund_code', 'code'), pick(row, 'fundName', 'fund_name', 'name', 'fund')].filter(Boolean).join(' ') || '--';
+const actionHref = (row) => {
+  const explicit = pick(row, 'href', 'url', 'actionPath', 'action_path', 'legacyPath', 'legacy_path');
+  if (explicit) {
+    const text = String(explicit);
+    return text.startsWith('http') || text.startsWith('/') ? text : `/${text.replace(/^\.?\//, '')}`;
+  }
+  const id = pick(row, 'id', 'actionId', 'action_id', 'decisionId', 'decision_id');
+  return id ? `/actions/${id}` : '#';
+};
+%>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>操作记录</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('partials/nav', { active: 'operations' }) %>
+    <main class="page-grid">
+      <section class="page-heading">
+        <p class="eyebrow">操作记录</p>
+        <h1>操作记录</h1>
+        <p>决策、订单和现金变动按时间线展开，便于复盘。</p>
+      </section>
+
+      <section class="metrics-grid compact" aria-label="操作统计">
+        <article class="metric-card">
+          <span>决策</span>
+          <strong class="num"><%= fmtNum(totalFrom(decisionPagination, decisions.length), 0) %></strong>
+          <small>计入每日限制的操作会在详情标记</small>
+        </article>
+        <article class="metric-card">
+          <span>订单</span>
+          <strong class="num"><%= fmtNum(totalFrom(orderPagination, orders.length), 0) %></strong>
+          <small>提交、确认、结算状态</small>
+        </article>
+        <article class="metric-card">
+          <span>现金流水</span>
+          <strong class="num"><%= fmtNum(totalFrom(cashPagination, cashRows.length), 0) %></strong>
+          <small>入金、出金、交易占用</small>
+        </article>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">决策时间线</p>
+            <h2>决策时间线</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>类型</th>
+                <th>基金</th>
+                <th class="num">金额</th>
+                <th>交易日</th>
+                <th>状态</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (rows.length) { %>
+                <% rows.forEach((row) => { const href = actionHref(row); %>
+                  <tr class="click-row" data-href="<%= href %>" onclick="if (this.dataset.href !== '#') window.location.href = this.dataset.href">
+                    <td><%= pick(row, 'submittedAt', 'submitted_at', 'createdAt', 'created_at', 'date') || '--' %></td>
+                    <td><span class="status-chip"><%= labelAction(pick(row, 'actionType', 'action_type', 'type')) %></span></td>
+                    <td><%= fundLabel(row) %></td>
+                    <td class="num"><%= moneyFrom(row, ['amount'], ['amountCents', 'amount_cents']) %></td>
+                    <td><%= pick(row, 'tradeDate', 'trade_date', 'applicationTradeDate', 'application_trade_date') || '--' %></td>
+                    <td><%= labelStatus(pick(row, 'status', 'state')) %></td>
+                    <td class="num"><a class="row-link" href="<%= href %>">详情</a></td>
+                  </tr>
+                <% }) %>
+              <% } else { %>
+                <tr><td class="empty-row" colspan="7">暂无决策或操作记录。</td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+        <%- include('partials/pagination', { pagination: decisionPagination, param: 'decisionPage', pageSizeParam: 'decisionPageSize', label: '决策时间线', query }) %>
+      </section>
+
+      <section class="split-grid">
+        <article class="glass-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">订单</p>
+              <h2>订单</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>订单号</th>
+                  <th>方向</th>
+                  <th>基金</th>
+                  <th class="num">金额/份额</th>
+                  <th class="num">净值</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (orders.length) { %>
+                  <% orders.forEach((row) => { %>
+                    <tr>
+                      <td><%= pick(row, 'orderNo', 'order_no', 'id') || '--' %></td>
+                      <td><%= labelAction(pick(row, 'side', 'type', 'actionType', 'action_type')) %></td>
+                      <td><%= fundLabel(row) %></td>
+                      <td class="num"><%= moneyFrom(row, ['amount'], ['amountCents', 'amount_cents']) %> / <%= scaledFrom(row, ['shares'], ['sharesInt', 'shares_int'], 4) %></td>
+                      <td class="num"><%= scaledFrom(row, ['nav', 'confirmedNav', 'confirmed_nav'], ['navInt', 'nav_int', 'confirmedNavInt', 'confirmed_nav_int'], 4) %></td>
+                      <td><%= labelStatus(pick(row, 'status', 'state')) %></td>
+                    </tr>
+                  <% }) %>
+                <% } else { %>
+                  <tr><td class="empty-row" colspan="6">暂无订单。</td></tr>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+          <%- include('partials/pagination', { pagination: orderPagination, param: 'orderPage', pageSizeParam: 'orderPageSize', label: '订单', query }) %>
+        </article>
+
+        <article class="glass-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">现金变动</p>
+              <h2>现金变动</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>类型</th>
+                  <th class="num">金额</th>
+                  <th>备注</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (cashRows.length) { %>
+                  <% cashRows.forEach((row) => { %>
+                    <tr>
+                      <td><%= pick(row, 'createdAt', 'created_at', 'tradeDate', 'trade_date', 'date') || '--' %></td>
+                      <td><%= labelCashType(pick(row, 'type', 'entryType', 'entry_type')) %></td>
+                      <td class="num"><%= moneyFrom(row, ['amount'], ['amountCents', 'amount_cents']) %></td>
+                      <td><%= pick(row, 'reason', 'memo', 'note') || '--' %></td>
+                    </tr>
+                  <% }) %>
+                <% } else { %>
+                  <tr><td class="empty-row" colspan="4">暂无现金变动。</td></tr>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+          <%- include('partials/pagination', { pagination: cashPagination, param: 'cashPage', pageSizeParam: 'cashPageSize', label: '现金变动', query }) %>
+        </article>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

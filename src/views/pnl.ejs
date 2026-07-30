@@ -1,0 +1,176 @@
+<%
+const vm = typeof data !== 'undefined' && data ? data : (typeof viewModel !== 'undefined' && viewModel ? viewModel : {});
+const pick = (obj, ...keys) => {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+  }
+  return undefined;
+};
+const arr = (value) => Array.isArray(value) ? value : [];
+const summary = pick(vm, 'summary', 'pnlSummary', 'account') || (Array.isArray(vm) ? {} : vm);
+const pnlRows = Array.isArray(vm) ? vm : arr(pick(vm, 'pnlEntries', 'pnl', 'entries', 'snapshots'));
+const positions = arr(pick(vm, 'positions', 'holdings', 'positionRows'));
+const pnlPagination = pick(vm, 'pnlPagination', 'pagination') || {};
+const fmtNum = (value, digits = 2) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : String(value);
+};
+const money = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? `¥${fmtNum(n, 2)}` : String(value);
+};
+const moneyFrom = (obj, keys, centKeys = []) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return money(raw);
+  const cents = pick(obj, ...centKeys);
+  return money(cents === undefined ? undefined : Number(cents) / 100);
+};
+const pct = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return `${fmtNum(Math.abs(n) <= 1 ? n * 100 : n, 2)}%`;
+};
+const pctFrom = (obj, keys, ppmKeys = []) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return pct(raw);
+  const ppm = pick(obj, ...ppmKeys);
+  return pct(ppm === undefined ? undefined : Number(ppm) / 10000);
+};
+const tone = (value) => {
+  const n = Number(value);
+  return !Number.isFinite(n) || n === 0 ? 'muted' : n > 0 ? 'positive' : 'negative';
+};
+const fundLabel = (row) => [pick(row, 'fundCode', 'fund_code', 'code'), pick(row, 'fundName', 'fund_name', 'name')].filter(Boolean).join(' ') || '--';
+const totalFrom = (meta, fallback) => pick(meta, 'totalItems', 'total_items', 'total') ?? fallback;
+%>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>盈亏分析</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('partials/nav', { active: 'pnl' }) %>
+    <main class="page-grid">
+      <section class="page-heading">
+        <p class="eyebrow">盈亏</p>
+        <h1>盈亏分析</h1>
+        <p>用快照和持仓收益追踪账本的真实表现。</p>
+      </section>
+
+      <section class="metrics-grid" aria-label="盈亏指标">
+        <article class="metric-card">
+          <span>累计盈亏</span>
+          <strong class="num <%= tone(pick(summary, 'accumulatedPnl', 'accumulated_pnl', 'totalPnl', 'total_pnl', 'cumulativePnl', 'cumulative_pnl')) %>"><%= moneyFrom(summary, ['accumulatedPnl', 'accumulated_pnl', 'totalPnl', 'total_pnl', 'cumulativePnl', 'cumulative_pnl'], ['accumulatedPnlCents', 'accumulated_pnl_cents', 'totalPnlCents', 'total_pnl_cents', 'cumulativePnlCents', 'cumulative_pnl_cents']) %></strong>
+          <small><%= pctFrom(summary, ['totalPnlRate', 'total_pnl_rate', 'returnRate', 'return_rate'], ['totalPnlPpm', 'total_pnl_ppm', 'returnPpm', 'return_ppm']) %></small>
+        </article>
+        <article class="metric-card">
+          <span>今日盈亏</span>
+          <strong class="num <%= tone(pick(summary, 'todayPnl', 'today_pnl', 'dailyPnl', 'daily_pnl')) %>"><%= moneyFrom(summary, ['todayPnl', 'today_pnl', 'dailyPnl', 'daily_pnl'], ['todayPnlCents', 'today_pnl_cents', 'dailyPnlCents', 'daily_pnl_cents']) %></strong>
+          <small><%= pctFrom(summary, ['todayPnlRate', 'today_pnl_rate', 'dailyPnlRate', 'daily_pnl_rate'], ['todayPnlPpm', 'today_pnl_ppm']) %></small>
+        </article>
+        <article class="metric-card">
+          <span>已实现</span>
+          <strong class="num <%= tone(pick(summary, 'realizedPnl', 'realized_pnl')) %>"><%= moneyFrom(summary, ['realizedPnl', 'realized_pnl'], ['realizedPnlCents', 'realized_pnl_cents']) %></strong>
+          <small>卖出确认后归集</small>
+        </article>
+        <article class="metric-card">
+          <span>未实现</span>
+          <strong class="num <%= tone(pick(summary, 'unrealizedPnl', 'unrealized_pnl')) %>"><%= moneyFrom(summary, ['unrealizedPnl', 'unrealized_pnl'], ['unrealizedPnlCents', 'unrealized_pnl_cents']) %></strong>
+          <small>持仓浮动收益</small>
+        </article>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">盈亏快照</p>
+            <h2>盈亏快照</h2>
+          </div>
+          <span class="subtle">共 <%= fmtNum(totalFrom(pnlPagination, pnlRows.length), 0) %> 条</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th class="num">总资产</th>
+                <th class="num">现金</th>
+                <th class="num">持仓</th>
+                <th class="num">当日盈亏</th>
+                <th class="num">累计盈亏</th>
+                <th class="num">收益率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (pnlRows.length) { %>
+                <% pnlRows.forEach((row) => { %>
+                  <tr>
+                    <td><%= pick(row, 'snapshotDate', 'snapshot_date', 'entryDate', 'entry_date', 'date') || '--' %></td>
+                    <td class="num"><%= moneyFrom(row, ['totalAssets', 'total_assets'], ['totalAssetsCents', 'total_assets_cents']) %></td>
+                    <td class="num"><%= moneyFrom(row, ['cash', 'cashBalance', 'cash_balance'], ['cashCents', 'cash_cents', 'cashBalanceCents', 'cash_balance_cents']) %></td>
+                    <td class="num"><%= moneyFrom(row, ['positionValue', 'position_value'], ['positionValueCents', 'position_value_cents']) %></td>
+                    <td class="num <%= tone(pick(row, 'dailyPnl', 'daily_pnl', 'todayPnl', 'today_pnl')) %>"><%= moneyFrom(row, ['dailyPnl', 'daily_pnl', 'todayPnl', 'today_pnl'], ['dailyPnlCents', 'daily_pnl_cents', 'todayPnlCents', 'today_pnl_cents']) %></td>
+                    <td class="num <%= tone(pick(row, 'accumulatedPnl', 'accumulated_pnl', 'totalPnl', 'total_pnl', 'cumulativePnl', 'cumulative_pnl')) %>"><%= moneyFrom(row, ['accumulatedPnl', 'accumulated_pnl', 'totalPnl', 'total_pnl', 'cumulativePnl', 'cumulative_pnl'], ['accumulatedPnlCents', 'accumulated_pnl_cents', 'totalPnlCents', 'total_pnl_cents', 'cumulativePnlCents', 'cumulative_pnl_cents']) %></td>
+                    <td class="num"><%= pctFrom(row, ['returnRate', 'return_rate', 'pnlRate', 'pnl_rate'], ['returnPpm', 'return_ppm', 'pnlPpm', 'pnl_ppm']) %></td>
+                  </tr>
+                <% }) %>
+              <% } else { %>
+                <tr><td class="empty-row" colspan="7">暂无盈亏快照。</td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+        <%- include('partials/pagination', { pagination: pnlPagination, param: 'pnlPage', pageSizeParam: 'pnlPageSize', label: '盈亏快照', query }) %>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">按基金</p>
+            <h2>持仓盈亏</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>基金</th>
+                <th class="num">成本</th>
+                <th class="num">市值</th>
+                <th class="num">浮动盈亏</th>
+                <th class="num">收益率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (positions.length) { %>
+                <% positions.forEach((row) => { %>
+                  <tr>
+                    <td><strong><%= fundLabel(row) %></strong></td>
+                    <td class="num"><%= moneyFrom(row, ['cost', 'costBasis', 'cost_basis'], ['costCents', 'cost_cents', 'costBasisCents', 'cost_basis_cents']) %></td>
+                    <td class="num"><%= moneyFrom(row, ['marketValue', 'market_value', 'value'], ['marketValueCents', 'market_value_cents', 'valueCents', 'value_cents']) %></td>
+                    <td class="num <%= tone(pick(row, 'pnl', 'unrealizedPnl', 'unrealized_pnl')) %>"><%= moneyFrom(row, ['pnl', 'unrealizedPnl', 'unrealized_pnl'], ['pnlCents', 'pnl_cents', 'unrealizedPnlCents', 'unrealized_pnl_cents']) %></td>
+                    <td class="num"><%= pctFrom(row, ['pnlRate', 'pnl_rate', 'returnRate', 'return_rate'], ['pnlPpm', 'pnl_ppm', 'returnPpm', 'return_ppm']) %></td>
+                  </tr>
+                <% }) %>
+              <% } else { %>
+                <tr><td class="empty-row" colspan="5">暂无持仓盈亏。</td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<%
+const vm = typeof data !== 'undefined' && data ? data : (typeof viewModel !== 'undefined' && viewModel ? viewModel : {});
+const pick = (obj, ...keys) => {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+  }
+  return undefined;
+};
+const arr = (value) => Array.isArray(value) ? value : [];
+const summary = Array.isArray(vm) ? {} : vm;
+const account = pick(summary, 'account') || {};
+const balance = pick(summary, 'balance') || summary;
+const positions = arr(pick(summary, 'positions', 'holdings', 'positionRows') || pick(balance, 'positions'));
+const cashRows = arr(pick(summary, 'cashLedger', 'cashEntries', 'cashRows', 'cash'));
+const snapshots = arr(pick(summary, 'snapshots', 'accountSnapshots', 'latestSnapshots'));
+const cashPagination = pick(summary, 'cashPagination', 'cashLedgerPagination') || {};
+const snapshotPagination = pick(summary, 'snapshotPagination', 'snapshotsPagination') || {};
+const fmtNum = (value, digits = 2) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : String(value);
+};
+const money = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? `¥${fmtNum(n, 2)}` : String(value);
+};
+const moneyFrom = (obj, keys, centKeys = []) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return money(raw);
+  const cents = pick(obj, ...centKeys);
+  return money(cents === undefined ? undefined : Number(cents) / 100);
+};
+const scaledFrom = (obj, keys, intKeys = [], digits = 4) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return fmtNum(raw, digits);
+  const intValue = pick(obj, ...intKeys);
+  return fmtNum(intValue === undefined ? undefined : Number(intValue) / 10000, digits);
+};
+const pct = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return `${fmtNum(Math.abs(n) <= 1 ? n * 100 : n, 2)}%`;
+};
+const pctFrom = (obj, keys, ppmKeys = []) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return pct(raw);
+  const ppm = pick(obj, ...ppmKeys);
+  return pct(ppm === undefined ? undefined : Number(ppm) / 10000);
+};
+const tone = (value) => {
+  const n = Number(value);
+  return !Number.isFinite(n) || n === 0 ? 'muted' : n > 0 ? 'positive' : 'negative';
+};
+const labelCashType = (value) => ({
+  deposit: '入金',
+  withdraw: '出金',
+  correction: '余额修正',
+  buy_order: '买入扣款',
+  sell_settlement: '卖出到账',
+  import: '历史导入',
+  fee: '手续费',
+  refund: '退款'
+}[String(value || '').toLowerCase()] || value || '--');
+const fundLabel = (row) => [pick(row, 'fundCode', 'fund_code', 'code'), pick(row, 'fundName', 'fund_name', 'name')].filter(Boolean).join(' ') || '--';
+%>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>账户明细</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('partials/nav', { active: 'account' }) %>
+    <main class="page-grid">
+      <section class="page-heading">
+        <p class="eyebrow">账户</p>
+        <h1>账户明细</h1>
+        <p>现金、冻结资金、持仓成本和快照记录集中查看。</p>
+      </section>
+
+      <section class="metrics-grid" aria-label="账户指标">
+        <article class="metric-card">
+          <span>总资产</span>
+          <strong class="num"><%= moneyFrom(summary, ['totalAssets', 'total_assets'], ['totalAssetsCents', 'total_assets_cents']) %></strong>
+          <small><%= pick(account, 'accountName', 'account_name', 'name') || '默认账户' %></small>
+        </article>
+        <article class="metric-card">
+          <span>现金余额</span>
+          <strong class="num"><%= moneyFrom(balance, ['cashTotal', 'cash_total', 'cash', 'cashBalance', 'cash_balance'], ['cashTotalCents', 'cash_total_cents', 'cashCents', 'cash_cents', 'cashBalanceCents', 'cash_balance_cents']) %></strong>
+          <small>可用 <%= moneyFrom(balance, ['cashAvailable', 'cash_available', 'availableCash', 'available_cash'], ['cashAvailableCents', 'cash_available_cents', 'availableCashCents', 'available_cash_cents']) %></small>
+        </article>
+        <article class="metric-card">
+          <span>冻结现金</span>
+          <strong class="num"><%= moneyFrom(balance, ['cashFrozen', 'cash_frozen', 'lockedCash', 'locked_cash', 'frozenCash', 'frozen_cash'], ['cashFrozenCents', 'cash_frozen_cents', 'lockedCashCents', 'locked_cash_cents', 'frozenCashCents', 'frozen_cash_cents']) %></strong>
+          <small>待确认/待结算</small>
+        </article>
+        <article class="metric-card">
+          <span>持仓市值</span>
+          <strong class="num"><%= moneyFrom(summary, ['positionsMarketValue', 'positions_market_value', 'positionValue', 'position_value', 'marketValue', 'market_value'], ['positionsMarketValueCents', 'positions_market_value_cents', 'positionValueCents', 'position_value_cents', 'marketValueCents', 'market_value_cents']) %></strong>
+          <small><%= pick(summary, 'positionCount', 'position_count') ?? positions.length %> 条持仓</small>
+        </article>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">持仓明细</p>
+            <h2>持仓明细</h2>
+          </div>
+          <span class="subtle">交易日 <%= pick(summary.latestSnapshot || {}, 'snapshotDate', 'snapshot_date') || pick(account, 'tradeDate', 'trade_date', 'snapshotDate', 'snapshot_date') || '--' %></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>基金</th>
+                <th class="num">可用份额</th>
+                <th class="num">在途份额</th>
+                <th class="num">成本</th>
+                <th class="num">最新净值</th>
+                <th class="num">市值</th>
+                <th class="num">盈亏</th>
+                <th class="num">收益率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (positions.length) { %>
+                <% positions.forEach((row) => { %>
+                  <tr>
+                    <td><strong><%= fundLabel(row) %></strong></td>
+                    <td class="num"><%= scaledFrom(row, ['availableShares', 'available_shares', 'shares'], ['availableSharesInt', 'available_shares_int', 'sharesInt', 'shares_int'], 4) %></td>
+                    <td class="num"><%= scaledFrom(row, ['pendingShares', 'pending_shares'], ['pendingSharesInt', 'pending_shares_int'], 4) %></td>
+                    <td class="num"><%= moneyFrom(row, ['cost', 'costBasis', 'cost_basis'], ['costCents', 'cost_cents', 'costBasisCents', 'cost_basis_cents']) %></td>
+                    <td class="num"><%= scaledFrom(row, ['nav', 'latestNav', 'latest_nav', 'lastNav', 'last_nav'], ['navInt', 'nav_int', 'latestNavInt', 'latest_nav_int', 'lastNavInt', 'last_nav_int'], 4) %></td>
+                    <td class="num"><%= moneyFrom(row, ['marketValue', 'market_value', 'value'], ['marketValueCents', 'market_value_cents', 'valueCents', 'value_cents']) %></td>
+                    <td class="num <%= tone(pick(row, 'pnl', 'unrealizedPnl', 'unrealized_pnl')) %>"><%= moneyFrom(row, ['pnl', 'unrealizedPnl', 'unrealized_pnl'], ['pnlCents', 'pnl_cents', 'unrealizedPnlCents', 'unrealized_pnl_cents']) %></td>
+                    <td class="num"><%= pctFrom(row, ['pnlRate', 'pnl_rate', 'returnRate', 'return_rate'], ['pnlPpm', 'pnl_ppm', 'returnPpm', 'return_ppm']) %></td>
+                  </tr>
+                <% }) %>
+              <% } else { %>
+                <tr><td class="empty-row" colspan="8">暂无持仓明细。</td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="split-grid">
+        <article class="glass-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">现金流水</p>
+              <h2>现金流水</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>类型</th>
+                  <th class="num">金额</th>
+                  <th class="num">余额</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (cashRows.length) { %>
+                  <% cashRows.forEach((row) => { %>
+                    <tr>
+                      <td><%= pick(row, 'createdAt', 'created_at', 'tradeDate', 'trade_date', 'date') || '--' %></td>
+                      <td><%= labelCashType(pick(row, 'type', 'entryType', 'entry_type', 'reason')) %></td>
+                      <td class="num <%= tone(pick(row, 'amount')) %>"><%= moneyFrom(row, ['amount'], ['amountCents', 'amount_cents']) %></td>
+                      <td class="num"><%= moneyFrom(row, ['balance', 'cashBalance', 'cash_balance'], ['balanceCents', 'balance_cents', 'cashBalanceCents', 'cash_balance_cents']) %></td>
+                    </tr>
+                  <% }) %>
+                <% } else { %>
+                  <tr><td class="empty-row" colspan="4">暂无现金流水。</td></tr>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+          <%- include('partials/pagination', { pagination: cashPagination, param: 'cashPage', pageSizeParam: 'cashPageSize', label: '现金流水', query }) %>
+        </article>
+
+        <article class="glass-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">资产快照</p>
+              <h2>资产快照</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th class="num">总资产</th>
+                  <th class="num">现金</th>
+                  <th class="num">持仓</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (snapshots.length) { %>
+                  <% snapshots.forEach((row) => { %>
+                    <tr>
+                      <td><%= pick(row, 'snapshotDate', 'snapshot_date', 'date') || '--' %></td>
+                      <td class="num"><%= moneyFrom(row, ['totalAssets', 'total_assets'], ['totalAssetsCents', 'total_assets_cents']) %></td>
+                      <td class="num"><%= moneyFrom(row, ['cash', 'cashBalance', 'cash_balance'], ['cashCents', 'cash_cents', 'cashBalanceCents', 'cash_balance_cents']) %></td>
+                      <td class="num"><%= moneyFrom(row, ['positionValue', 'position_value'], ['positionValueCents', 'position_value_cents']) %></td>
+                    </tr>
+                  <% }) %>
+                <% } else { %>
+                  <tr><td class="empty-row" colspan="4">暂无资产快照。</td></tr>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+          <%- include('partials/pagination', { pagination: snapshotPagination, param: 'snapshotPage', pageSizeParam: 'snapshotPageSize', label: '资产快照', query }) %>
+        </article>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,216 @@
+<%
+const vm = typeof data !== 'undefined' && data ? data : (typeof viewModel !== 'undefined' && viewModel ? viewModel : {});
+const pick = (obj, ...keys) => {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+  }
+  return undefined;
+};
+const arr = (value) => Array.isArray(value) ? value : [];
+const summary = pick(vm, 'summary', 'account', 'balance') || (Array.isArray(vm) ? {} : vm);
+const snapshot = pick(vm, 'latestSnapshot', 'snapshot') || {};
+const positions = arr(pick(vm, 'positions', 'holdings', 'snapshotPositions', 'positionRows'));
+const actions = arr(pick(vm, 'latestActions', 'recentActions', 'actions', 'decisions'));
+const latestAction = pick(vm, 'latestAction', 'lastAction') || actions[0] || {};
+const fmtNum = (value, digits = 2) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : String(value);
+};
+const money = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? `¥${fmtNum(n, 2)}` : String(value);
+};
+const moneyFrom = (obj, keys, centKeys = []) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return money(raw);
+  const cents = pick(obj, ...centKeys);
+  return money(cents === undefined ? undefined : Number(cents) / 100);
+};
+const scaledFrom = (obj, keys, intKeys = [], digits = 4) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return fmtNum(raw, digits);
+  const intValue = pick(obj, ...intKeys);
+  return fmtNum(intValue === undefined ? undefined : Number(intValue) / 10000, digits);
+};
+const pct = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return `${fmtNum(Math.abs(n) <= 1 ? n * 100 : n, 2)}%`;
+};
+const pctFrom = (obj, keys, ppmKeys = []) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return pct(raw);
+  const ppm = pick(obj, ...ppmKeys);
+  return pct(ppm === undefined ? undefined : Number(ppm) / 10000);
+};
+const tone = (value) => {
+  const n = Number(value);
+  return !Number.isFinite(n) || n === 0 ? 'muted' : n > 0 ? 'positive' : 'negative';
+};
+const labelAction = (value) => ({ buy: '买入', sell: '卖出', hold: '观望', convert: '转换', switch: '转换', cash: '现金', nav: '净值' }[String(value || '').toLowerCase()] || value || '--');
+const labelStatus = (value) => ({
+  recorded: '已记录',
+  ordered: '已下单',
+  submitted: '已提交',
+  confirmed: '已确认',
+  settled: '已到账',
+  cancelled: '已取消',
+  pending: '待处理'
+}[String(value || '').toLowerCase()] || value || '--');
+const fundLabel = (row) => {
+  const fund = pick(row, 'fund');
+  if (fund && typeof fund === 'object') return [pick(fund, 'code'), pick(fund, 'name')].filter(Boolean).join(' ') || '--';
+  return [pick(row, 'fundCode', 'fund_code', 'code'), pick(row, 'fundName', 'fund_name', 'name', 'fund')].filter(Boolean).join(' ') || '--';
+};
+const actionHref = (row) => {
+  const explicit = pick(row, 'href', 'url', 'actionPath', 'action_path', 'legacyPath', 'legacy_path');
+  if (explicit) {
+    const text = String(explicit);
+    return text.startsWith('http') || text.startsWith('/') ? text : `/${text.replace(/^\.?\//, '')}`;
+  }
+  const id = pick(row, 'id', 'actionId', 'action_id', 'decisionId', 'decision_id');
+  return id ? `/actions/${id}` : '#';
+};
+%>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>基金模拟账本总览</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('partials/nav', { active: 'dashboard' }) %>
+    <main class="page-grid">
+      <section class="page-heading">
+        <p class="eyebrow">账本总览</p>
+        <h1>账户总览</h1>
+        <p>按交易日沉淀现金、持仓、决策与快照。</p>
+      </section>
+
+      <section class="metrics-grid" aria-label="关键指标">
+        <article class="metric-card">
+          <span>总资产</span>
+          <strong class="num"><%= moneyFrom(summary, ['totalAssets', 'total_assets'], ['totalAssetsCents', 'total_assets_cents']) %></strong>
+          <small>快照 <%= pick(snapshot, 'snapshotDate', 'snapshot_date', 'date') || pick(summary, 'snapshotDate', 'snapshot_date') || '--' %></small>
+        </article>
+        <article class="metric-card">
+          <span>可用现金</span>
+          <strong class="num"><%= moneyFrom(summary, ['cashAvailable', 'cash_available', 'availableCash', 'available_cash', 'cash'], ['cashAvailableCents', 'cash_available_cents', 'availableCashCents', 'available_cash_cents', 'cashCents', 'cash_cents']) %></strong>
+          <small>冻结 <%= moneyFrom(summary, ['cashFrozen', 'cash_frozen', 'lockedCash', 'locked_cash'], ['cashFrozenCents', 'cash_frozen_cents', 'lockedCashCents', 'locked_cash_cents']) %></small>
+        </article>
+        <article class="metric-card">
+          <span>持仓市值</span>
+          <strong class="num"><%= moneyFrom(summary, ['positionsMarketValue', 'positions_market_value', 'positionValue', 'position_value', 'marketValue', 'market_value'], ['positionsMarketValueCents', 'positions_market_value_cents', 'positionValueCents', 'position_value_cents', 'marketValueCents', 'market_value_cents']) %></strong>
+          <small><%= pick(summary, 'positionCount', 'position_count') ?? positions.length %> 个持仓</small>
+        </article>
+        <article class="metric-card">
+          <span>今日盈亏</span>
+          <strong class="num <%= tone(pick(summary, 'todayPnl', 'today_pnl', 'dailyPnl', 'daily_pnl')) %>"><%= moneyFrom(summary, ['todayPnl', 'today_pnl', 'dailyPnl', 'daily_pnl'], ['todayPnlCents', 'today_pnl_cents', 'dailyPnlCents', 'daily_pnl_cents']) %></strong>
+          <small><%= pctFrom(summary, ['todayPnlRate', 'today_pnl_rate', 'dailyPnlRate', 'daily_pnl_rate'], ['todayPnlPpm', 'today_pnl_ppm']) %> · 决策 <%= pick(summary, 'decisionCount', 'decision_count') ?? '--' %>/<%= pick(summary, 'decisionLimit', 'decision_limit') ?? '--' %></small>
+        </article>
+      </section>
+
+      <section class="glass-panel focus-panel">
+        <div>
+          <p class="eyebrow">最新操作</p>
+          <h2>最近操作</h2>
+          <p><%= pick(latestAction, 'reason', 'note', 'notes', 'memo', 'summary') || '暂无最新操作，导入或提交决策后会显示在这里。' %></p>
+        </div>
+        <a class="soft-button" href="<%= actionHref(latestAction) %>">查看详情</a>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">当前持仓</p>
+            <h2>当前持仓</h2>
+          </div>
+          <a href="/account">账户明细</a>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>基金</th>
+                <th class="num">份额</th>
+                <th class="num">净值</th>
+                <th class="num">市值</th>
+                <th class="num">成本</th>
+                <th class="num">盈亏</th>
+                <th class="num">收益率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (positions.length) { %>
+                <% positions.forEach((row) => { %>
+                  <tr>
+                    <td><strong><%= fundLabel(row) %></strong></td>
+                    <td class="num"><%= scaledFrom(row, ['shares'], ['sharesInt', 'shares_int'], 4) %></td>
+                    <td class="num"><%= scaledFrom(row, ['nav', 'latestNav', 'latest_nav', 'lastNav', 'last_nav'], ['navInt', 'nav_int', 'latestNavInt', 'latest_nav_int', 'lastNavInt', 'last_nav_int'], 4) %></td>
+                    <td class="num"><%= moneyFrom(row, ['marketValue', 'market_value', 'value'], ['marketValueCents', 'market_value_cents', 'valueCents', 'value_cents']) %></td>
+                    <td class="num"><%= moneyFrom(row, ['cost', 'costBasis', 'cost_basis'], ['costCents', 'cost_cents', 'costBasisCents', 'cost_basis_cents']) %></td>
+                    <td class="num <%= tone(pick(row, 'pnl', 'unrealizedPnl', 'unrealized_pnl')) %>"><%= moneyFrom(row, ['pnl', 'unrealizedPnl', 'unrealized_pnl'], ['pnlCents', 'pnl_cents', 'unrealizedPnlCents', 'unrealized_pnl_cents']) %></td>
+                    <td class="num"><%= pctFrom(row, ['pnlRate', 'pnl_rate', 'returnRate', 'return_rate'], ['pnlPpm', 'pnl_ppm', 'returnPpm', 'return_ppm']) %></td>
+                  </tr>
+                <% }) %>
+              <% } else { %>
+                <tr><td class="empty-row" colspan="7">暂无持仓数据。</td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">近期操作</p>
+            <h2>近期操作</h2>
+          </div>
+          <a href="/operations">全部操作</a>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>类型</th>
+                <th>基金</th>
+                <th class="num">金额</th>
+                <th>状态</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (actions.length) { %>
+                <% actions.slice(0, 10).forEach((row) => { const href = actionHref(row); %>
+                  <tr class="click-row" data-href="<%= href %>" onclick="if (this.dataset.href !== '#') window.location.href = this.dataset.href">
+                    <td><%= pick(row, 'submittedAt', 'submitted_at', 'decisionDate', 'decision_date', 'tradeDate', 'trade_date', 'date') || '--' %></td>
+                    <td><span class="status-chip"><%= labelAction(pick(row, 'actionType', 'action_type', 'type')) %></span></td>
+                    <td><%= fundLabel(row) %></td>
+                    <td class="num"><%= moneyFrom(row, ['amount'], ['amountCents', 'amount_cents']) %></td>
+                    <td><%= labelStatus(pick(row, 'status', 'state')) %></td>
+                    <td class="num"><a class="row-link" href="<%= href %>">查看</a></td>
+                  </tr>
+                <% }) %>
+              <% } else { %>
+                <tr><td class="empty-row" colspan="6">暂无操作记录。</td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

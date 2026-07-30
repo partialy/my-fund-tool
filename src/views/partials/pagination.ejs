@@ -1,0 +1,48 @@
+<%
+const meta = pagination || {};
+const safeLabel = typeof label !== 'undefined' && label ? label : '列表';
+const safeParam = typeof param !== 'undefined' && param ? param : 'page';
+const safePageSizeParam = typeof pageSizeParam !== 'undefined' && pageSizeParam
+  ? pageSizeParam
+  : `${safeParam.replace(/Page$/, '')}PageSize`;
+const safeQuery = typeof query !== 'undefined' && query ? query : {};
+const page = Number(meta.page || 1);
+const pageSize = Number(meta.pageSize || 10);
+const totalItems = Number(meta.totalItems || 0);
+const totalPages = Math.max(1, Number(meta.totalPages || 1));
+const pageHref = (targetPage) => {
+  const search = new URLSearchParams();
+  Object.entries(safeQuery).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== undefined && item !== null && item !== '') search.append(key, String(item));
+      });
+      return;
+    }
+    search.set(key, String(value));
+  });
+  search.set(safeParam, String(targetPage));
+  search.set(safePageSizeParam, String(pageSize));
+  return `?${search.toString()}`;
+};
+%>
+<nav class="pagination-bar" aria-label="<%= safeLabel %>分页">
+  <span>第 <%= page %> / <%= totalPages %> 页 · 共 <%= totalItems %> 条 · 每页 <%= pageSize %> 条</span>
+  <div class="pagination-actions">
+    <% if (page > 1) { %>
+      <a href="<%= pageHref(1) %>">首页</a>
+      <a href="<%= pageHref(page - 1) %>">上一页</a>
+    <% } else { %>
+      <span class="is-disabled">首页</span>
+      <span class="is-disabled">上一页</span>
+    <% } %>
+    <% if (page < totalPages) { %>
+      <a href="<%= pageHref(page + 1) %>">下一页</a>
+      <a href="<%= pageHref(totalPages) %>">末页</a>
+    <% } else { %>
+      <span class="is-disabled">下一页</span>
+      <span class="is-disabled">末页</span>
+    <% } %>
+  </div>
+</nav>

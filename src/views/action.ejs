@@ -1,0 +1,196 @@
+<%
+const vm = typeof data !== 'undefined' && data ? data : (typeof viewModel !== 'undefined' && viewModel ? viewModel : {});
+const pick = (obj, ...keys) => {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+  }
+  return undefined;
+};
+const arr = (value) => Array.isArray(value) ? value : [];
+const action = pick(vm, 'action', 'decision', 'entry') || vm || {};
+const singleOrder = pick(vm, 'order');
+const orders = arr(pick(vm, 'orders', 'relatedOrders', 'orderRows')).concat(singleOrder ? [singleOrder] : []);
+const sourceRefs = arr(pick(vm, 'sourceRefs', 'sources', 'references'));
+const fmtNum = (value, digits = 2) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : String(value);
+};
+const money = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? `¥${fmtNum(n, 2)}` : String(value);
+};
+const moneyFrom = (obj, keys, centKeys = []) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return money(raw);
+  const cents = pick(obj, ...centKeys);
+  return money(cents === undefined ? undefined : Number(cents) / 100);
+};
+const scaledFrom = (obj, keys, intKeys = [], digits = 4) => {
+  const raw = pick(obj, ...keys);
+  if (raw !== undefined) return fmtNum(raw, digits);
+  const intValue = pick(obj, ...intKeys);
+  return fmtNum(intValue === undefined ? undefined : Number(intValue) / 10000, digits);
+};
+const labelAction = (value) => ({ buy: '买入', sell: '卖出', hold: '观望', convert: '转换', switch: '转换', cash: '现金', nav: '净值' }[String(value || '').toLowerCase()] || value || '--');
+const labelStatus = (value) => ({
+  recorded: '已记录',
+  ordered: '已下单',
+  submitted: '已提交',
+  confirmed: '已确认',
+  settled: '已到账',
+  cancelled: '已取消',
+  pending: '待处理'
+}[String(value || '').toLowerCase()] || value || '未记录状态');
+const labelSourceType = (value) => ({
+  nav: '净值',
+  quote: '行情',
+  fund_quote: '基金行情',
+  fund_nav: '基金净值',
+  source: '来源',
+  decision: '决策记录'
+}[String(value || '').toLowerCase()] || value || '来源');
+const fundLabel = (row) => {
+  const fund = pick(row, 'fund');
+  if (fund && typeof fund === 'object') return [pick(fund, 'code'), pick(fund, 'name')].filter(Boolean).join(' ') || '--';
+  return [pick(row, 'fundCode', 'fund_code', 'code'), pick(row, 'fundName', 'fund_name', 'name', 'fund')].filter(Boolean).join(' ') || '--';
+};
+const boolLabel = (value) => value === true || value === 1 || value === '1' ? '是' : '否';
+const actionNo = pick(action, 'decisionNo', 'decision_no', 'note', 'id', 'decisionId', 'decision_id');
+const pageTitle = `操作详情 ${actionNo || ''}`.trim();
+%>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= pageTitle %></title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('partials/nav', { active: 'operations' }) %>
+    <main class="page-grid">
+      <section class="page-heading">
+        <p class="eyebrow">操作详情</p>
+        <h1>操作详情</h1>
+        <p>保留决策动机、交易日、订单和来源，方便日后复盘。</p>
+      </section>
+
+      <section class="detail-grid">
+        <article class="glass-panel detail-main">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">决策</p>
+              <h2><%= labelAction(pick(action, 'actionType', 'action_type', 'type')) %> <%= fundLabel(action) %></h2>
+            </div>
+            <span class="status-chip"><%= labelStatus(pick(action, 'status', 'state')) %></span>
+          </div>
+          <dl class="detail-list">
+            <div>
+              <dt>决策编号</dt>
+              <dd><%= actionNo || '--' %></dd>
+            </div>
+            <div>
+              <dt>提交时间</dt>
+              <dd><%= pick(action, 'submittedAt', 'submitted_at', 'createdAt', 'created_at', 'date') || '--' %></dd>
+            </div>
+            <div>
+              <dt>申请交易日</dt>
+              <dd><%= pick(action, 'tradeDate', 'trade_date', 'applicationTradeDate', 'application_trade_date', 'decisionDate', 'decision_date') || '--' %></dd>
+            </div>
+            <div>
+              <dt>金额</dt>
+              <dd class="num"><%= moneyFrom(action, ['amount'], ['amountCents', 'amount_cents']) %></dd>
+            </div>
+            <div>
+              <dt>净值</dt>
+              <dd class="num"><%= scaledFrom(action, ['nav', 'targetNav', 'target_nav'], ['navInt', 'nav_int', 'targetNavInt', 'target_nav_int'], 4) %></dd>
+            </div>
+            <div>
+              <dt>每日限制计数</dt>
+              <dd><%= boolLabel(pick(action, 'countsDaily', 'counts_daily')) %></dd>
+            </div>
+            <div>
+              <dt>外部路径</dt>
+              <dd><%= pick(action, 'legacyPath', 'legacy_path', 'sourcePath', 'source_path') || '--' %></dd>
+            </div>
+          </dl>
+        </article>
+
+        <aside class="glass-panel note-panel">
+          <p class="eyebrow">决策理由</p>
+          <h2>决策备注</h2>
+          <p><%= pick(action, 'reason', 'note', 'notes', 'memo', 'description') || '暂无备注。' %></p>
+        </aside>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">关联订单</p>
+            <h2>关联订单</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>订单号</th>
+                <th>方向</th>
+                <th class="num">金额</th>
+                <th class="num">份额</th>
+                <th class="num">确认净值</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (orders.length) { %>
+                <% orders.forEach((row) => { %>
+                  <tr>
+                    <td><%= pick(row, 'orderNo', 'order_no', 'id') || '--' %></td>
+                    <td><%= labelAction(pick(row, 'side', 'type', 'actionType', 'action_type')) %></td>
+                    <td class="num"><%= moneyFrom(row, ['amount'], ['amountCents', 'amount_cents']) %></td>
+                    <td class="num"><%= scaledFrom(row, ['shares'], ['sharesInt', 'shares_int'], 4) %></td>
+                    <td class="num"><%= scaledFrom(row, ['confirmedNav', 'confirmed_nav', 'nav'], ['confirmedNavInt', 'confirmed_nav_int', 'navInt', 'nav_int'], 4) %></td>
+                    <td><%= labelStatus(pick(row, 'status', 'state')) %></td>
+                  </tr>
+                <% }) %>
+              <% } else { %>
+                <tr><td class="empty-row" colspan="6">暂无关联订单。</td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">数据来源</p>
+            <h2>数据来源</h2>
+          </div>
+        </div>
+        <div class="source-list">
+          <% if (sourceRefs.length) { %>
+            <% sourceRefs.forEach((row) => { %>
+              <article>
+                <strong><%= pick(row, 'title', 'sourceName', 'source_name') || labelSourceType(pick(row, 'type')) %></strong>
+                <span><%= pick(row, 'url', 'path', 'sourcePath', 'source_path', 'ref') || '--' %></span>
+                <p><%= pick(row, 'note', 'memo', 'description') || '' %></p>
+              </article>
+            <% }) %>
+          <% } else { %>
+            <p class="empty-state">暂无来源引用。</p>
+          <% } %>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
