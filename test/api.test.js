@@ -511,6 +511,26 @@ test('account pages preserve accountCode in navigation and position history requ
   }
 });
 
+test('pages default to the Codex account when opened without accountCode', async () => {
+  const fixture = await createAppFixture('page-default-account');
+
+  try {
+    for (const pagePath of ['/', '/account', '/operations', '/pnl']) {
+      const response = await request(fixture.app).get(pagePath).expect(200);
+      const $ = cheerio.load(response.text);
+
+      assert.equal(
+        $('select[name="accountCode"] option[selected][value="account-codex"]').length,
+        1,
+        `${pagePath} should select the Codex account`,
+      );
+      assert.doesNotMatch(response.text, /Account code is required/);
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test('decisions endpoint returns a requested page with pagination metadata', async () => {
   const fixture = await createAppFixture('decision-pagination');
 

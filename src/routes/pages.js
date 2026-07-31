@@ -1,4 +1,5 @@
 import express from 'express';
+import { DEFAULT_ACCOUNT_CODE } from '../services/ledgerService.js';
 
 const PAGE_METHODS = {
   dashboard: ['getDashboardViewModel', 'getDashboard', 'getDashboardSummary', 'getToday'],
@@ -82,9 +83,15 @@ export function createPagesRouter({ ledger } = {}) {
 function pageHandler({ ledger, view, title, active, methods, getPayload = defaultPayload }) {
   return async (request, response, next) => {
     try {
-      const payload = getPayload(request);
+      const payload = withDefaultPageAccount(getPayload(request));
       const data = await loadPageData(ledger, methods, payload);
-      const model = { title, active, data, query: request.query, params: request.params };
+      const model = {
+        title,
+        active,
+        data,
+        query: withDefaultPageAccount(request.query),
+        params: request.params
+      };
       renderPage(response, view, model, next);
     } catch (error) {
       next(error);
@@ -107,6 +114,23 @@ async function loadPageData(ledger, methods, payload) {
 
 function defaultPayload(request) {
   return { ...request.query };
+}
+
+function withDefaultPageAccount(payload = {}) {
+  const normalized = { ...payload };
+  const hasAccount = [
+    'accountCode',
+    'account_code',
+    'account',
+    'accountId',
+    'account_id'
+  ].some((key) => normalized[key] !== undefined && normalized[key] !== null && normalized[key] !== '');
+
+  if (!hasAccount) {
+    normalized.accountCode = DEFAULT_ACCOUNT_CODE;
+  }
+
+  return normalized;
 }
 
 function renderPage(response, view, model, next) {

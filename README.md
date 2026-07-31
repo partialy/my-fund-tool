@@ -63,7 +63,7 @@ git config --global https.proxy http://192.168.9.100:10809
 
 ## 多账户
 
-多账户模式不做登录和权限。账本归属类接口必须显式传 `accountCode` 或 `accountId`，GET 接口放在 query，POST 接口可放在 JSON body 或 query；缺少账户参数会直接返回错误。Codex 当前账户代码为 `account-codex`。市场数据接口 `/api/market/funds/:code/nav` 和 `/api/market/quotes` 是全局行情数据，不按账户隔离。
+多账户模式不做登录和权限。账本归属类接口必须显式传 `accountCode` 或 `accountId`，GET 接口放在 query，POST 接口可放在 JSON body 或 query；缺少账户参数会直接返回错误。页面入口在未传账户时默认展示 Codex 账户。Codex 当前账户代码为 `account-codex`。市场数据接口 `/api/market/funds/:code/nav` 和 `/api/market/quotes` 是全局行情数据，不按账户隔离。
 
 创建账户示例：
 

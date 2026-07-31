@@ -77,6 +77,7 @@ pnpm dev
 - 当前工具支持轻量多账户，不做登录、鉴权或安全隔离。
 - 外部调用优先使用 `accountCode` 选择账户；GET 接口放 query，POST 接口可放 JSON body 或 query。
 - 账本归属接口必须显式传 `accountCode` 或 `accountId`；缺少账户参数要直接报错，不做隐式默认。
+- 页面入口未传账户参数时默认展示 Codex 账户，页面后续导航、分页和明细请求应继续带上当前 `accountCode`。
 - Codex 当前账户代码和名称均为 `account-codex`。
 - `accounts` 是账户主表；`cash_ledger`、`decisions`、`orders`、`positions`、`account_snapshots`、`pnl_entries` 以 `account_id` 隔离。
 - `fund_navs` 和 `market_quotes` 是全局行情数据，不按账户重复存储。
