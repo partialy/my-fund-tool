@@ -1,11 +1,11 @@
 # 外部模型交接协议
 
-本文档用于把基金模拟游戏交给无法直接访问本地接口的外部模型参与决策。外部模型只负责提出“需要哪些数据”和“想执行什么决策”；Codex 负责调用本地接口、联网补行情、计算交易结果、写入账本并验证。
+本文档用于把基金模拟游戏交给无法直接访问本地接口的外部模型参与决策。外部模型负责提出“需要哪些本地账本数据”和“想执行什么决策”，也可以自行联网搜索公开行情和候选基金；Codex 负责调用本地接口、必要时联网复核或代取行情、计算交易结果、写入账本并验证。
 
 ## 角色分工
 
 - 用户：在外部模型和 Codex 之间转发 JSON。
-- 外部模型：根据本文档填写数据需求清单，收到数据后给出决策命令 JSON。
+- 外部模型：根据本文档填写数据需求清单，收到数据后给出决策命令 JSON；也可以自行联网搜索公开基金和行情数据，独立选择候选基金。
 - Codex：读取本地 API 和真实市场数据，按固定格式返回数据；收到决策命令后代为计算、校验、写入和复核。
 - 本地工具：Node + Express + SQLite 基金模拟账本，服务器地址 `http://192.168.9.18:53999`。
 
@@ -14,7 +14,7 @@
 - 当前 Codex 账户代码和名称均为 `account-codex`。
 - 账本归属类 API 必须显式传 `accountCode` 或 `accountId`；缺少账户参数必须报错。
 - 页面入口可不带账户参数打开，首屏默认展示 `account-codex`，后续导航、分页和明细请求会继续带当前账户。
-- 每个自然日最多 3 次计数决策；买入、卖出、转换、不操作都计数。
+- 每个自然日最多 3 次计数决策；买入、卖出、转换、撤回订单、不操作都计数。
 - 净值更新、订单确认、卖出到账、资产快照、纯数据整理默认不计入每日 3 次。
 - 15:00 或以前提交的买入、卖出、转换，申请交易日为当日，按当日净值确认。
 - 15:00 后提交的买入、卖出、转换，申请交易日顺延到下一交易日，按下一交易日净值确认。
@@ -23,6 +23,10 @@
 - 转换默认拆成“卖出原基金 + 买入目标基金”，先卖出确认到账，再按可用资金买入目标基金。
 - 成交、确认、盈亏、快照必须使用真实披露净值；盘中估值和指数走势只能辅助决策。
 - 市场数据优先级：基金公司或披露净值页优先，其次天天基金/东方财富，其次新浪财经等公开数据源。
+- 外部模型可以自行联网搜索其他基金，选择任意可公开核验的公募基金，不限制在 Codex、DeepSeek、豆包或其他账户已投资基金里；也可以继续空仓或只观察。
+- 公开行情、候选基金、费率、规模、风格、历史净值等信息，外部模型优先自行搜索并在理由中说明来源；只有确实无法访问或需要 Codex 复核时，才通过数据需求清单请求 Codex 代取。
+- 本游戏虽是模拟，但使用真实基金盘数据和真实交易规则记录账本。每次买入、卖出、转换或撤单前，都必须谨慎核对数据日期、来源、15:00 规则、T+1 规则和风控约束；没有明确优势时允许 `hold`。
+- 状态为 `submitted` 的未确认订单可以在确认前撤回，撤回接口为 `POST /api/orders/:orderNo/cancel`；状态为 `confirmed`、`settled` 或 `cancelled` 的订单不能撤回。撤回不会删除原下单决策的每日次数，撤回本身作为交易决策时默认也计数。
 - 默认手续费为 0；如果外部模型明确要求按真实费率，必须说明费率来源，Codex 再判断是否可用。
 - 风控限制：单只基金买入后市值不超过总资产 50%；单次买入金额不超过总资产 30%；账户总收益率低于 -10% 时下一次只能减仓、转换到低风险基金或空仓观察；单基金收益率低于 -8% 时必须说明继续持有、减仓或转换理由。
 
@@ -123,6 +127,7 @@ END_FUND_SIM_JSON
 | `market.indexQuotes` | 互联网 + 本地记录 | `symbols`、`quoteType` | 指数盘中或收盘行情 |
 | `market.fundEstimates` | 互联网 | `fundCodes`、`quoteType` | 基金盘中估值，仅辅助 |
 | `fund.research` | 互联网 | `fundCodes`、`topics` | 基金费率、跟踪指数、风格、规模等 |
+| `fund.discovery` | 互联网 | `keywords`、`categories`、`riskStyle`、`limit` | 当外部模型无法自行搜索时，请 Codex 代找候选基金 |
 | `risk.limits` | 本文档 + 本地账本 | 无 | 每日次数、仓位、回撤、单基金亏损等限制 |
 
 推荐的日内决策请求：
@@ -280,12 +285,12 @@ END_FUND_SIM_JSON
 | `basedOnRequestId` | 是 | 对应的数据需求请求编号 |
 | `accountCode` | 是 | 必须显式填写，默认 `account-codex` |
 | `decidedAt` | 是 | 外部模型给出决策的北京时间 |
-| `decision.action` | 是 | `hold`、`buy`、`sell`、`switch`、`update_only`、`cash_adjustment` |
-| `decision.countsDaily` | 是 | 买入/卖出/转换/不操作通常为 `true`，纯净值/确认/到账为 `false` |
+| `decision.action` | 是 | `hold`、`buy`、`sell`、`switch`、`cancel_order`、`update_only`、`cash_adjustment` |
+| `decision.countsDaily` | 是 | 买入/卖出/转换/撤回订单/不操作通常为 `true`，纯净值/确认/到账为 `false` |
 | `decision.reason` | 是 | 决策理由 |
 | `decision.confidence` | 否 | `low`、`medium`、`high` |
 | `decision.nextSuggestedAt` | 否 | 建议下一次执行时间 |
-| `orders` | 是 | 买入、卖出、转换意图数组；不操作填空数组 |
+| `orders` | 是 | 买入、卖出、转换、撤回订单意图数组；不操作填空数组 |
 | `cashAdjustments` | 否 | 增加/减少/修正现金余额 |
 | `navUpdates` | 否 | 外部模型要求写入的官方净值；通常由 Codex 获取 |
 | `executionConstraints` | 否 | 执行约束 |
@@ -339,6 +344,18 @@ END_FUND_SIM_JSON
 }
 ```
 
+撤回未确认订单：
+
+```json
+{
+  "type": "cancel_order",
+  "orderNo": "account-doubao-ORD-20260803-0001",
+  "reason": "确认前发现原数据不足或风险收益比变化，撤回未确认买入。"
+}
+```
+
+撤回只适用于 `submitted` 状态订单。买入撤回后会退回已扣减现金；卖出撤回只改变订单状态。撤回不会抹掉原下单决策次数；如本次撤回属于新的交易决策，应让 `decision.countsDaily=true`。
+
 现金调整：
 
 ```json
@@ -377,14 +394,15 @@ Codex 收到 `operation-command` 后必须执行以下步骤：
 2. 重新读取当前时间、账户余额、持仓、待处理订单、今日决策次数。
 3. 如果 `skipIfDataStaleAfterMinutes` 已触发，重新拉取必要数据或停止执行。
 4. 先处理账务事项：官方净值写入、订单确认、卖出到账、资产快照。
-5. 再处理外部模型的计数决策。
-6. 校验现金、份额、每日 3 次、单基金 50%、单次 30%、亏损风控。
-7. 按 15:00 规则计算申请交易日。
-8. 写入 `/api/decisions`。
-9. 如需交易，写入 `/api/orders`；买入使用金额，卖出使用份额。
-10. 如需现金调整，写入 `/api/account/cash-adjustments`。
-11. 写入后重新 GET 余额、持仓、订单、决策、盈亏或页面，确认结果。
-12. 返回 `fund-sim.execution-report.v1`。
+5. 如命令要求撤回未确认订单，先核对订单账户、`submitted` 状态和今日剩余次数；如果撤回本身计入决策，先写入 `/api/decisions` 记录 `cancel_order`，再调用 `/api/orders/:orderNo/cancel`。
+6. 再处理外部模型的其他计数决策。
+7. 校验现金、份额、每日 3 次、单基金 50%、单次 30%、亏损风控。
+8. 按 15:00 规则计算申请交易日。
+9. 写入 `/api/decisions`。
+10. 如需交易，写入 `/api/orders`；买入使用金额，卖出使用份额。
+11. 如需现金调整，写入 `/api/account/cash-adjustments`。
+12. 写入后重新 GET 余额、持仓、订单、决策、盈亏或页面，确认结果。
+13. 返回 `fund-sim.execution-report.v1`。
 
 如果命令里存在风险或数据不足，Codex 应停止写入并返回 `blocked` 报告，不要猜测执行。
 
@@ -447,7 +465,9 @@ Codex 执行后返回：
 - 不要伪造本地账本字段、订单编号、确认份额、到账金额。
 - 不要自行假设今日剩余决策次数，必须从数据响应读取。
 - 不要要求超过可用现金、可卖份额或风控上限的交易。
-- 如果需要候选基金研究，先在数据需求清单中请求 `fund.research` 或 `fund.nav.history`。
+- 可以自行联网搜索候选基金并独立判断，不必跟随其他模型已买基金，也不必为了交易而交易。
+- 如自行搜索公开数据不足，再在数据需求清单中请求 `fund.discovery`、`fund.research` 或 `fund.nav.history`，由 Codex 代取或复核。
+- 决策必须按真实盘模拟的谨慎口径给出，明确数据日期、核心依据和主要风险。
 - 如果不确定，优先返回 `hold` 或请求更多数据。
 - 决策理由必须能被写入日志，避免只有“看涨/看跌”这种不可复核的短句。
 
@@ -472,6 +492,7 @@ POST /api/market/quotes
 POST /api/decisions
 POST /api/orders
 POST /api/orders/:orderNo/confirm
+POST /api/orders/:orderNo/cancel
 POST /api/orders/:orderNo/settle
 POST /api/valuation/snapshot
 ```

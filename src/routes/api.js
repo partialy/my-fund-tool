@@ -26,6 +26,7 @@ const LEDGER_METHODS = {
   decision: ['createDecision', 'recordDecision', 'addDecision'],
   order: ['createOrder', 'submitOrder', 'placeOrder'],
   confirmOrder: ['confirmOrder', 'confirmOrderByNo'],
+  cancelOrder: ['cancelOrder', 'cancelOrderByNo'],
   settleOrder: ['settleOrder', 'settleOrderByNo'],
   snapshot: [
     'createValuationSnapshot',
@@ -152,6 +153,12 @@ export function createApiRouter({ ledger, db, importLegacyData } = {}) {
       payload,
       [request.params.orderNo, bodyPayload(request)],
     );
+    sendSuccessResponse(response, data);
+  }));
+
+  router.post('/orders/:orderNo/cancel', asyncHandler(async (request, response) => {
+    const payload = bodyWithQueryAndParams(request, { orderNo: request.params.orderNo });
+    const data = await callLedger(ledger, LEDGER_METHODS.cancelOrder, payload);
     sendSuccessResponse(response, data);
   }));
 

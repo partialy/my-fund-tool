@@ -25,7 +25,7 @@ export const DEFAULT_ACCOUNT_CODE = 'account-codex';
 const LEGACY_DEFAULT_ACCOUNT_CODE = 'default';
 const DEFAULT_ACCOUNT_NAME = 'account-codex';
 const DEFAULT_INITIAL_CASH_CENTS = 1000000;
-const COUNTING_ACTIONS = new Set(['buy', 'sell', 'switch', 'hold']);
+const COUNTING_ACTIONS = new Set(['buy', 'sell', 'switch', 'hold', 'cancel_order']);
 
 function plain(row) {
   return row ? { ...row } : null;
@@ -1272,6 +1272,64 @@ export function createLedgerService(db) {
     });
   }
 
+  function cancelOrder(orderNoOrInput, maybeInput = {}) {
+    const orderNo = typeof orderNoOrInput === 'object'
+      ? orderNoOrInput.orderNo ?? orderNoOrInput.order_no
+      : orderNoOrInput;
+    const input = typeof orderNoOrInput === 'object' ? orderNoOrInput : maybeInput;
+
+    return transaction(() => {
+      const order = get('SELECT * FROM orders WHERE order_no = :orderNo', { orderNo });
+      if (!order) {
+        throw new Error(`Order not found: ${orderNo}`);
+      }
+
+      const account = requireAccount(input);
+      if (account.id !== order.account_id) {
+        throw new Error(`Order ${order.order_no} does not belong to account ${account.code}.`);
+      }
+
+      if (order.status !== 'submitted') {
+        throw new Error(`Only submitted orders can be cancelled. Current status: ${order.status}`);
+      }
+
+      const cancelledAt = toLocalDateTime(input.cancelledAt ?? input.cancelled_at ?? new Date());
+      const note = input.note ?? input.reason ?? `Cancelled unconfirmed order ${order.order_no}`;
+
+      if (order.side === 'buy') {
+        applyCashChange({
+          accountId: order.account_id,
+          type: 'refund',
+          amountCents: order.amount_cents,
+          occurredAt: cancelledAt,
+          relatedType: 'order',
+          relatedId: order.order_no,
+          note
+        });
+      }
+
+      run(
+        `UPDATE orders
+         SET status = 'cancelled',
+             note = :note,
+             updated_at = datetime('now')
+         WHERE order_no = :orderNo`,
+        { orderNo, note }
+      );
+
+      if (order.decision_id) {
+        run(
+          `UPDATE decisions
+           SET status = 'cancelled'
+           WHERE id = :decisionId AND account_id = :accountId`,
+          { decisionId: order.decision_id, accountId: order.account_id }
+        );
+      }
+
+      return get('SELECT * FROM orders WHERE order_no = :orderNo', { orderNo });
+    });
+  }
+
   function settleOrder(orderNoOrInput, maybeInput = {}) {
     const orderNo = typeof orderNoOrInput === 'object'
       ? orderNoOrInput.orderNo ?? orderNoOrInput.order_no
@@ -2000,6 +2058,7 @@ export function createLedgerService(db) {
     recordDecision,
     createOrder,
     confirmOrder,
+    cancelOrder,
     settleOrder,
     createSnapshot,
     getToday,

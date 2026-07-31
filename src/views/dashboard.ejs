@@ -54,7 +54,7 @@ const tone = (value) => {
   const n = Number(value);
   return !Number.isFinite(n) || n === 0 ? 'muted' : n > 0 ? 'positive' : 'negative';
 };
-const labelAction = (value) => ({ buy: '买入', sell: '卖出', hold: '观望', convert: '转换', switch: '转换', cash: '现金', nav: '净值' }[String(value || '').toLowerCase()] || value || '--');
+const labelAction = (value) => ({ buy: '买入', sell: '卖出', hold: '观望', convert: '转换', switch: '转换', cancel_order: '撤单', update_only: '仅更新', cash_adjustment: '现金调整', cash: '现金', nav: '净值' }[String(value || '').toLowerCase()] || value || '--');
 const labelStatus = (value) => ({
   recorded: '已记录',
   ordered: '已下单',

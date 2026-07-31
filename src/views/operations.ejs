@@ -41,7 +41,7 @@ const scaledFrom = (obj, keys, intKeys = [], digits = 4) => {
   const intValue = pick(obj, ...intKeys);
   return fmtNum(intValue === undefined ? undefined : Number(intValue) / 10000, digits);
 };
-const labelAction = (value) => ({ buy: '买入', sell: '卖出', hold: '观望', convert: '转换', switch: '转换', cash: '现金', nav: '净值' }[String(value || '').toLowerCase()] || value || '--');
+const labelAction = (value) => ({ buy: '买入', sell: '卖出', hold: '观望', convert: '转换', switch: '转换', cancel_order: '撤单', update_only: '仅更新', cash_adjustment: '现金调整', cash: '现金', nav: '净值' }[String(value || '').toLowerCase()] || value || '--');
 const labelStatus = (value) => ({
   recorded: '已记录',
   ordered: '已下单',

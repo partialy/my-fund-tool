@@ -447,6 +447,112 @@ test('accountCode isolates balances decisions orders and positions', async () =>
   }
 });
 
+test('submitted buy order can be cancelled and refunded before confirmation', async () => {
+  const fixture = await createAppFixture('cancel-submitted-buy');
+
+  try {
+    await request(fixture.app)
+      .post('/api/market/funds/A001/nav')
+      .send({
+        fundName: '测试基金A',
+        navDate: '2026-07-31',
+        nav: '1.0000',
+        source: '测试净值源',
+      })
+      .expect(200);
+
+    const decision = unwrapBody(
+      await request(fixture.app)
+        .post('/api/decisions')
+        .send({
+          accountCode: CODEX_ACCOUNT_CODE,
+          decisionDate: '2026-07-31',
+          submittedAt: '2026-07-31T14:30:00+08:00',
+          action: 'buy',
+          fundCode: 'A001',
+          fundName: '测试基金A',
+          amount: '1000.00',
+          reason: '测试撤回未确认买入',
+        })
+        .expect(200),
+    );
+
+    const order = unwrapBody(
+      await request(fixture.app)
+        .post('/api/orders')
+        .send({
+          accountCode: CODEX_ACCOUNT_CODE,
+          decisionId: decision.id,
+          submittedAt: '2026-07-31T14:30:00+08:00',
+          side: 'buy',
+          fundCode: 'A001',
+          fundName: '测试基金A',
+          amount: '1000.00',
+          tradeDate: '2026-07-31',
+          fee: '0.00',
+        })
+        .expect(200),
+    );
+
+    const afterOrderBalance = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200),
+    );
+    assert.equal(afterOrderBalance.cashAvailable, 9000);
+
+    const cancelled = unwrapBody(
+      await request(fixture.app)
+        .post(`/api/orders/${encodeURIComponent(order.order_no)}/cancel`)
+        .send({
+          accountCode: CODEX_ACCOUNT_CODE,
+          cancelledAt: '2026-07-31T14:45:00+08:00',
+          note: '测试撤回未确认订单',
+        })
+        .expect(200),
+    );
+    assert.equal(cancelled.status, 'cancelled');
+
+    const afterCancelBalance = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200),
+    );
+    assert.equal(afterCancelBalance.cashAvailable, 10000);
+
+    const orders = unwrapBody(
+      await request(fixture.app)
+        .get('/api/orders')
+        .query({ accountCode: CODEX_ACCOUNT_CODE, page: 1, pageSize: 10 })
+        .expect(200),
+    );
+    assert.equal(orders.items[0].status, 'cancelled');
+
+    const cashLedger = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/cash-ledger')
+        .query({ accountCode: CODEX_ACCOUNT_CODE, page: 1, pageSize: 10 })
+        .expect(200),
+    );
+    const refundLedger = cashLedger.items.find((item) => item.type === 'refund');
+    assert.ok(refundLedger);
+    assert.equal(refundLedger.amount_cents, 100000);
+
+    const decisions = unwrapBody(
+      await request(fixture.app)
+        .get('/api/decisions')
+        .query({ accountCode: CODEX_ACCOUNT_CODE, page: 1, pageSize: 10 })
+        .expect(200),
+    );
+    assert.equal(decisions.items[0].status, 'cancelled');
+    assert.equal(decisions.items[0].counts_daily, 1);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test('account pages preserve accountCode in navigation and position history requests', async () => {
   const fixture = await createAppFixture('account-page-code');
 
@@ -626,6 +732,59 @@ test('decision endpoint rejects the fourth counted decision on one date', async 
       String(rejected.body.error?.message ?? rejected.body.error ?? ''),
       /daily|limit|decision|次数|上限|最多|3/i,
     );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('cancel_order decisions count toward the daily limit by default', async () => {
+  const fixture = await createAppFixture('cancel-order-counts');
+
+  try {
+    await request(fixture.app)
+      .post('/api/decisions')
+      .send({
+        accountCode: CODEX_ACCOUNT_CODE,
+        submittedAt: '2026-07-28T09:30:00+08:00',
+        action: 'hold',
+        reason: '第一次观察',
+      })
+      .expect(200);
+
+    await request(fixture.app)
+      .post('/api/decisions')
+      .send({
+        accountCode: CODEX_ACCOUNT_CODE,
+        submittedAt: '2026-07-28T12:00:00+08:00',
+        action: 'hold',
+        reason: '第二次观察',
+      })
+      .expect(200);
+
+    const cancelDecision = unwrapBody(
+      await request(fixture.app)
+        .post('/api/decisions')
+        .send({
+          accountCode: CODEX_ACCOUNT_CODE,
+          submittedAt: '2026-07-28T14:20:00+08:00',
+          action: 'cancel_order',
+          reason: '撤回一笔未确认订单',
+        })
+        .expect(200),
+    );
+    assert.equal(cancelDecision.counts_daily, 1);
+    assert.equal(cancelDecision.daily_sequence, 3);
+
+    const rejected = await request(fixture.app)
+      .post('/api/decisions')
+      .send({
+        accountCode: CODEX_ACCOUNT_CODE,
+        submittedAt: '2026-07-28T14:50:00+08:00',
+        action: 'hold',
+        reason: '第四次观察',
+      });
+
+    assert.ok([400, 409, 429].includes(rejected.status), rejected.text);
   } finally {
     await fixture.cleanup();
   }
