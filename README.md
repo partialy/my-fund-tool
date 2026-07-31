@@ -61,6 +61,10 @@ git config --global https.proxy http://192.168.9.100:10809
 - `POST /api/valuation/snapshot`
 - `POST /api/import/legacy`
 
+## 外部模型交接
+
+如果需要让无法访问本地接口的外部模型参与决策，使用 `docs/external-model-handoff.md`。外部模型只填写数据需求清单和决策命令 JSON；Codex 负责取数、联网补行情、计算交易日/份额/盈亏、调用接口写入账本并返回执行报告。
+
 ## 多账户
 
 多账户模式不做登录和权限。账本归属类接口必须显式传 `accountCode` 或 `accountId`，GET 接口放在 query，POST 接口可放在 JSON body 或 query；缺少账户参数会直接返回错误。页面入口在未传账户时默认展示 Codex 账户。Codex 当前账户代码为 `account-codex`。市场数据接口 `/api/market/funds/:code/nav` 和 `/api/market/quotes` 是全局行情数据，不按账户隔离。
