@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as cheerio from 'cheerio';
+import { DEFAULT_ACCOUNT_CODE } from '../services/ledgerService.js';
 
 const importerDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(importerDir, '../..');
@@ -45,6 +46,7 @@ export async function importLegacyData({
     importWithLedgerService(service, dataset);
     syncLegacyPositions(db, dataset);
     service.createSnapshot?.({
+      accountCode: DEFAULT_ACCOUNT_CODE,
       snapshotDate: dataset.latestUpdatedAt?.slice(0, 10) ?? '2026-07-28',
       note: 'Legacy import current account snapshot.',
     });
@@ -131,6 +133,7 @@ export async function parseLegacyData({ legacyDir = defaultLegacyDir } = {}) {
 
 function importWithLedgerService(service, dataset) {
   service.setupDefaultAccount?.({
+    accountCode: DEFAULT_ACCOUNT_CODE,
     initialCash: dataset.account.initialCash ?? '10000.00',
     occurredAt: `${dataset.operations[0]?.submittedDate ?? '2026-07-23'}T09:00:00+08:00`,
   });
@@ -147,6 +150,7 @@ function importWithLedgerService(service, dataset) {
 
   for (const decision of dataset.decisions) {
     const decisionRow = service.recordDecision?.({
+      accountCode: DEFAULT_ACCOUNT_CODE,
       decisionDate: decision.submittedDate,
       submittedAt: decision.submittedAt,
       action: decision.action,
@@ -170,6 +174,7 @@ function importWithLedgerService(service, dataset) {
     }
 
     const orderRow = service.createOrder?.({
+      accountCode: DEFAULT_ACCOUNT_CODE,
       orderNo: order.orderNo,
       decisionId: decisionRow?.id,
       side: order.side,
@@ -185,6 +190,7 @@ function importWithLedgerService(service, dataset) {
 
     if (orderRow && order.status === 'confirmed' && order.confirmNav) {
       service.confirmOrder?.({
+        accountCode: DEFAULT_ACCOUNT_CODE,
         orderNo: order.orderNo,
         confirmDate: order.confirmDate,
         settleDate: order.settleDate ?? order.confirmDate,
@@ -254,7 +260,9 @@ function syncLegacyPositions(db, dataset) {
     return;
   }
 
-  const account = db.prepare("SELECT id FROM accounts WHERE code = 'default'").get();
+  const account = db.prepare('SELECT id FROM accounts WHERE code = :code').get({
+    code: DEFAULT_ACCOUNT_CODE,
+  });
   if (!account) {
     return;
   }
@@ -331,7 +339,9 @@ function persistPnlEntries(db, dataset) {
     return;
   }
 
-  const account = db.prepare("SELECT id FROM accounts WHERE code = 'default'").get();
+  const account = db.prepare('SELECT id FROM accounts WHERE code = :code').get({
+    code: DEFAULT_ACCOUNT_CODE,
+  });
   if (!account) {
     return;
   }

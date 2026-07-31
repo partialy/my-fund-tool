@@ -9,7 +9,7 @@ const currentAccountCode = String(
     ?? vm.accountCode
     ?? queryParams.accountCode
     ?? queryParams.account_code
-    ?? 'default'
+    ?? ''
 );
 const withAccount = (href) => {
   const url = new URL(href, 'http://fund-sim.local');

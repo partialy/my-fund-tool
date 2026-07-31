@@ -21,8 +21,9 @@ import {
   shouldPaginate
 } from '../lib/pagination.js';
 
-const DEFAULT_ACCOUNT_CODE = 'default';
-const DEFAULT_ACCOUNT_NAME = '模拟账户';
+export const DEFAULT_ACCOUNT_CODE = 'account-codex';
+const LEGACY_DEFAULT_ACCOUNT_CODE = 'default';
+const DEFAULT_ACCOUNT_NAME = 'account-codex';
 const DEFAULT_INITIAL_CASH_CENTS = 1000000;
 const COUNTING_ACTIONS = new Set(['buy', 'sell', 'switch', 'hold']);
 
@@ -225,11 +226,15 @@ export function createLedgerService(db) {
 
   function requireAccount(input) {
     const selector = resolveAccountSelector(input);
+    if (selector.accountId === null && selector.accountCode === null) {
+      throw new Error('Account code is required.');
+    }
+
     const account = selector.accountId
       ? get('SELECT * FROM accounts WHERE id = :id', { id: selector.accountId })
       : selector.accountCode
         ? getAccountByCode(selector.accountCode)
-        : getDefaultAccount();
+        : null;
 
     if (!account) {
       const requested = selector.accountCode ?? selector.accountId;
@@ -516,13 +521,18 @@ export function createLedgerService(db) {
       return existing;
     }
 
+    const migrated = migrateLegacyDefaultAccount();
+    if (migrated) {
+      return migrated;
+    }
+
     return transaction(() => {
       const initialCashCents = readCents(
         options,
         ['initialCashCents', 'initial_cash_cents', 'initialCash', 'cash'],
         DEFAULT_INITIAL_CASH_CENTS
       );
-      const code = options.code ?? DEFAULT_ACCOUNT_CODE;
+      const code = options.accountCode ?? options.account_code ?? options.code ?? DEFAULT_ACCOUNT_CODE;
       const name = options.name ?? DEFAULT_ACCOUNT_NAME;
       const limit = Number(options.dailyDecisionLimit ?? options.daily_decision_limit ?? 3);
 
@@ -550,6 +560,34 @@ export function createLedgerService(db) {
       });
 
       return account;
+    });
+  }
+
+  function migrateLegacyDefaultAccount() {
+    if (DEFAULT_ACCOUNT_CODE === LEGACY_DEFAULT_ACCOUNT_CODE) {
+      return null;
+    }
+
+    const legacy = getAccountByCode(LEGACY_DEFAULT_ACCOUNT_CODE);
+    if (!legacy) {
+      return null;
+    }
+
+    return transaction(() => {
+      run(
+        `UPDATE accounts
+         SET code = :code,
+             name = :name,
+             updated_at = datetime('now')
+         WHERE id = :id`,
+        {
+          id: legacy.id,
+          code: DEFAULT_ACCOUNT_CODE,
+          name: DEFAULT_ACCOUNT_NAME
+        }
+      );
+
+      return getDefaultAccount();
     });
   }
 

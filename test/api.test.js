@@ -6,6 +6,8 @@ import test from 'node:test';
 import * as cheerio from 'cheerio';
 import request from 'supertest';
 
+const CODEX_ACCOUNT_CODE = 'account-codex';
+
 async function createAppFixture(name) {
   const root = path.join(os.tmpdir(), `fund-sim-tool-api-${name}-${Date.now()}`);
   await mkdir(root, { recursive: true });
@@ -51,13 +53,14 @@ function pickMoney(source, keys) {
   return asMoney(value);
 }
 
-async function seedDecisionRows(app, count) {
+async function seedDecisionRows(app, count, accountCode = CODEX_ACCOUNT_CODE) {
   for (let index = 1; index <= count; index += 1) {
     const day = String(index).padStart(2, '0');
     const note = `D-${day}`;
     const response = await request(app)
       .post('/api/decisions')
       .send({
+        accountCode,
         note,
         submittedAt: `2026-07-${day}T09:30:00+08:00`,
         action: 'hold',
@@ -70,6 +73,7 @@ async function seedDecisionRows(app, count) {
 }
 
 function seedConfirmedPosition(ledger, {
+  accountCode = CODEX_ACCOUNT_CODE,
   code = 'A001',
   fundName = '测试基金A',
   amount = '1000.00',
@@ -81,6 +85,7 @@ function seedConfirmedPosition(ledger, {
   latestNav = '1.1000',
 } = {}) {
   ledger.adjustCash({
+    accountCode,
     type: 'deposit',
     amount: '2000.00',
     occurredAt: '2026-01-01T09:00:00+08:00',
@@ -94,6 +99,7 @@ function seedConfirmedPosition(ledger, {
     source: '测试买入净值源',
   });
   const decision = ledger.recordDecision({
+    accountCode,
     decisionDate: '2026-01-01',
     submittedAt: '2026-01-01T14:30:00+08:00',
     action: 'buy',
@@ -103,6 +109,7 @@ function seedConfirmedPosition(ledger, {
     reason: '测试买入',
   });
   ledger.createOrder({
+    accountCode,
     orderNo,
     decisionId: decision.id,
     submittedAt: '2026-01-01T14:30:00+08:00',
@@ -114,6 +121,7 @@ function seedConfirmedPosition(ledger, {
     fee: '0.00',
   });
   ledger.confirmOrder({
+    accountCode,
     orderNo,
     confirmDate,
     settleDate: confirmDate,
@@ -126,27 +134,39 @@ function seedConfirmedPosition(ledger, {
     nav: latestNav,
     source: '测试最新净值源',
   });
-  ledger.createSnapshot({ snapshotDate: latestDate });
+  ledger.createSnapshot({ accountCode, snapshotDate: latestDate });
 }
 
 test('cash adjustment endpoint applies deposit, withdraw, and correction', async () => {
   const fixture = await createAppFixture('cash-adjustments');
 
   try {
+    const missingAccountWrite = await request(fixture.app)
+      .post('/api/account/cash-adjustments')
+      .send({
+        type: 'deposit',
+        amount: '1.00',
+        occurredAt: '2026-07-23T08:59:00+08:00',
+      });
+    assert.equal(missingAccountWrite.body.ok, false);
+
     for (const payload of [
       {
+        accountCode: CODEX_ACCOUNT_CODE,
         type: 'deposit',
         amount: '10000.00',
         occurredAt: '2026-07-23T09:00:00+08:00',
         reason: '初始资金',
       },
       {
+        accountCode: CODEX_ACCOUNT_CODE,
         type: 'withdraw',
         amount: '1200.50',
         occurredAt: '2026-07-23T10:00:00+08:00',
         reason: '测试减少现金',
       },
       {
+        accountCode: CODEX_ACCOUNT_CODE,
         type: 'correction',
         amount: '5000.00',
         occurredAt: '2026-07-23T11:00:00+08:00',
@@ -160,7 +180,16 @@ test('cash adjustment endpoint applies deposit, withdraw, and correction', async
       unwrapBody(response);
     }
 
-    const balance = unwrapBody(await request(fixture.app).get('/api/account/balance').expect(200));
+    const missingAccount = await request(fixture.app).get('/api/account/balance');
+    assert.equal(missingAccount.body.ok, false);
+    assert.match(String(missingAccount.body.error?.message ?? ''), /account/i);
+
+    const balance = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200),
+    );
     assert.equal(
       pickMoney(balance, ['availableCash', 'cash', 'cashAvailable', 'available_cash']),
       '5000.00',
@@ -193,8 +222,19 @@ test('accounts endpoint creates and lists independent accounts', async () => {
     const accounts = unwrapBody(await request(fixture.app).get('/api/accounts').expect(200));
     assert.deepEqual(
       accounts.map((account) => account.accountCode),
-      ['default', 'alt'],
+      ['account-codex', 'alt'],
     );
+
+    const missingBalance = await request(fixture.app).get('/api/account/balance');
+    assert.equal(missingBalance.body.ok, false);
+
+    const codexBalance = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200),
+    );
+    assert.equal(codexBalance.accountCode, 'account-codex');
 
     const balance = unwrapBody(
       await request(fixture.app)
@@ -224,11 +264,15 @@ test('accountCode isolates balances decisions orders and positions', async () =>
       .expect(200);
 
     const startingDefaultBalance = unwrapBody(
-      await request(fixture.app).get('/api/account/balance').expect(200),
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200),
     );
 
     for (const payload of [
       {
+        accountCode: CODEX_ACCOUNT_CODE,
         type: 'deposit',
         amount: '1000.00',
         note: '默认账户入金',
@@ -249,7 +293,10 @@ test('accountCode isolates balances decisions orders and positions', async () =>
     }
 
     const defaultBalance = unwrapBody(
-      await request(fixture.app).get('/api/account/balance').expect(200),
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200),
     );
     const altBalance = unwrapBody(
       await request(fixture.app)
@@ -274,6 +321,7 @@ test('accountCode isolates balances decisions orders and positions', async () =>
       await request(fixture.app)
         .post('/api/decisions')
         .send({
+          accountCode: CODEX_ACCOUNT_CODE,
           decisionDate: '2026-07-31',
           submittedAt: '2026-07-31T09:30:00+08:00',
           action: 'buy',
@@ -303,7 +351,7 @@ test('accountCode isolates balances decisions orders and positions', async () =>
     const defaultToday = unwrapBody(
       await request(fixture.app)
         .get('/api/today')
-        .query({ date: '2026-07-31T10:00:00+08:00' })
+        .query({ date: '2026-07-31T10:00:00+08:00', accountCode: CODEX_ACCOUNT_CODE })
         .expect(200),
     );
     const altToday = unwrapBody(
@@ -319,6 +367,7 @@ test('accountCode isolates balances decisions orders and positions', async () =>
       await request(fixture.app)
         .post('/api/orders')
         .send({
+          accountCode: CODEX_ACCOUNT_CODE,
           decisionId: defaultDecision.id,
           submittedAt: '2026-07-31T09:30:00+08:00',
           side: 'buy',
@@ -347,12 +396,13 @@ test('accountCode isolates balances decisions orders and positions', async () =>
         .expect(200),
     );
 
-    assert.match(defaultOrder.order_no, /^default-ORD-20260731-\d{4}$/);
+    assert.match(defaultOrder.order_no, /^account-codex-ORD-20260731-\d{4}$/);
     assert.match(altOrder.order_no, /^alt-ORD-20260731-\d{4}$/);
 
     await request(fixture.app)
       .post(`/api/orders/${encodeURIComponent(defaultOrder.order_no)}/confirm`)
       .send({
+        accountCode: CODEX_ACCOUNT_CODE,
         confirmDate: '2026-08-03',
         settleDate: '2026-08-03',
         nav: '1.0000',
@@ -381,7 +431,7 @@ test('accountCode isolates balances decisions orders and positions', async () =>
     const defaultPositions = unwrapBody(
       await request(fixture.app)
         .get('/api/positions')
-        .query({ page: 1, pageSize: 10 })
+        .query({ accountCode: CODEX_ACCOUNT_CODE, page: 1, pageSize: 10 })
         .expect(200),
     );
     const altPositions = unwrapBody(
@@ -469,7 +519,7 @@ test('decisions endpoint returns a requested page with pagination metadata', asy
 
     const response = await request(fixture.app)
       .get('/api/decisions')
-      .query({ page: 2, pageSize: 5 })
+      .query({ accountCode: CODEX_ACCOUNT_CODE, page: 2, pageSize: 5 })
       .expect(200);
     const data = unwrapBody(response);
 
@@ -496,7 +546,10 @@ test('operations page defaults the timeline to ten rows and exposes pagination l
   try {
     await seedDecisionRows(fixture.app, 12);
 
-    const firstPage = await request(fixture.app).get('/operations').expect(200);
+    const firstPage = await request(fixture.app)
+      .get('/operations')
+      .query({ accountCode: CODEX_ACCOUNT_CODE })
+      .expect(200);
     const $first = cheerio.load(firstPage.text);
     const firstTimeline = $first('section.glass-panel').first();
 
@@ -504,7 +557,10 @@ test('operations page defaults the timeline to ten rows and exposes pagination l
     assert.match(firstTimeline.text(), /第\s*1\s*\/\s*2\s*页/);
     assert.ok(firstTimeline.find('a[href*="decisionPage=2"]').length > 0);
 
-    const secondPage = await request(fixture.app).get('/operations?decisionPage=2').expect(200);
+    const secondPage = await request(fixture.app)
+      .get('/operations')
+      .query({ accountCode: CODEX_ACCOUNT_CODE, decisionPage: 2 })
+      .expect(200);
     const $second = cheerio.load(secondPage.text);
     const secondTimeline = $second('section.glass-panel').first();
 
@@ -524,6 +580,7 @@ test('decision endpoint rejects the fourth counted decision on one date', async 
       const response = await request(fixture.app)
         .post('/api/decisions')
         .send({
+          accountCode: CODEX_ACCOUNT_CODE,
           decisionNo: `20260728-00${index + 1}`,
           submittedAt: `2026-07-28T${time}+08:00`,
           action: 'hold',
@@ -535,6 +592,7 @@ test('decision endpoint rejects the fourth counted decision on one date', async 
     }
 
     const rejected = await request(fixture.app).post('/api/decisions').send({
+      accountCode: CODEX_ACCOUNT_CODE,
       decisionNo: '20260728-004',
       submittedAt: '2026-07-28T14:59:59+08:00',
       action: 'hold',
@@ -593,14 +651,20 @@ test('positions endpoint and pages show holding return rates', async () => {
     seedConfirmedPosition(fixture.app.locals.ledger);
 
     const positions = unwrapBody(
-      await request(fixture.app).get('/api/positions?page=1&pageSize=10').expect(200),
+      await request(fixture.app)
+        .get('/api/positions')
+        .query({ accountCode: CODEX_ACCOUNT_CODE, page: 1, pageSize: 10 })
+        .expect(200),
     );
     assert.equal(positions.items[0].fundCode, 'A001');
     assert.equal(positions.items[0].returnPpm, 100000);
     assert.equal(positions.items[0].returnRate, 0.1);
 
     for (const path of ['/', '/account']) {
-      const response = await request(fixture.app).get(path).expect(200);
+      const response = await request(fixture.app)
+        .get(path)
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200);
       const $ = cheerio.load(response.text);
       assert.equal($('td.num.positive').filter((_, element) => $(element).text().trim() === '10.00%').length, 1);
     }
@@ -622,6 +686,7 @@ test('position history endpoint returns current holding daily details', async ()
   try {
     const { ledger } = fixture.app.locals;
     ledger.adjustCash({
+      accountCode: CODEX_ACCOUNT_CODE,
       type: 'deposit',
       amount: '2000.00',
       occurredAt: '2026-01-01T09:00:00+08:00',
@@ -642,6 +707,7 @@ test('position history endpoint returns current holding daily details', async ()
       source: '测试净值源',
     });
     const decision = ledger.recordDecision({
+      accountCode: CODEX_ACCOUNT_CODE,
       decisionNo: '20260101-001',
       decisionDate: '2026-01-01',
       submittedAt: '2026-01-01T14:30:00+08:00',
@@ -652,6 +718,7 @@ test('position history endpoint returns current holding daily details', async ()
       reason: '测试买入',
     });
     ledger.createOrder({
+      accountCode: CODEX_ACCOUNT_CODE,
       orderNo: '20260101-001',
       decisionId: decision.id,
       submittedAt: '2026-01-01T14:30:00+08:00',
@@ -663,15 +730,17 @@ test('position history endpoint returns current holding daily details', async ()
       fee: '0.00',
     });
     ledger.confirmOrder({
+      accountCode: CODEX_ACCOUNT_CODE,
       orderNo: '20260101-001',
       confirmDate: '2026-01-03',
       settleDate: '2026-01-03',
       nav: '1.1000',
     });
-    ledger.createSnapshot({ snapshotDate: '2026-01-02' });
+    ledger.createSnapshot({ accountCode: CODEX_ACCOUNT_CODE, snapshotDate: '2026-01-02' });
 
     const response = await request(fixture.app)
-      .get('/api/positions/A001/history?page=1&pageSize=10')
+      .get('/api/positions/A001/history')
+      .query({ accountCode: CODEX_ACCOUNT_CODE, page: 1, pageSize: 10 })
       .expect(200);
     const data = unwrapBody(response);
 
@@ -693,6 +762,7 @@ test('account page exposes position history detail controls', async () => {
   try {
     const { ledger } = fixture.app.locals;
     ledger.adjustCash({
+      accountCode: CODEX_ACCOUNT_CODE,
       type: 'deposit',
       amount: '2000.00',
       occurredAt: '2026-01-01T09:00:00+08:00',
@@ -706,6 +776,7 @@ test('account page exposes position history detail controls', async () => {
       source: '测试净值源',
     });
     const decision = ledger.recordDecision({
+      accountCode: CODEX_ACCOUNT_CODE,
       decisionDate: '2026-01-01',
       submittedAt: '2026-01-01T14:30:00+08:00',
       action: 'buy',
@@ -715,6 +786,7 @@ test('account page exposes position history detail controls', async () => {
       reason: '测试买入',
     });
     ledger.createOrder({
+      accountCode: CODEX_ACCOUNT_CODE,
       orderNo: '20260101-001',
       decisionId: decision.id,
       submittedAt: '2026-01-01T14:30:00+08:00',
@@ -726,14 +798,18 @@ test('account page exposes position history detail controls', async () => {
       fee: '0.00',
     });
     ledger.confirmOrder({
+      accountCode: CODEX_ACCOUNT_CODE,
       orderNo: '20260101-001',
       confirmDate: '2026-01-03',
       settleDate: '2026-01-03',
       nav: '1.1000',
     });
-    ledger.createSnapshot({ snapshotDate: '2026-01-02' });
+    ledger.createSnapshot({ accountCode: CODEX_ACCOUNT_CODE, snapshotDate: '2026-01-02' });
 
-    const response = await request(fixture.app).get('/account').expect(200);
+    const response = await request(fixture.app)
+      .get('/account')
+      .query({ accountCode: CODEX_ACCOUNT_CODE })
+      .expect(200);
     const $ = cheerio.load(response.text);
 
     assert.equal($('[data-position-history-button][data-fund-code="A001"]').length, 1);

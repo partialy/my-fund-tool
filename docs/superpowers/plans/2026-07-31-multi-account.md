@@ -4,7 +4,7 @@
 
 **Goal:** Add lightweight multi-account support so local users can keep independent fund simulation ledgers without login or security features.
 
-**Architecture:** Keep the existing `accounts` table and account-scoped tables as the data model. Add one account resolver inside `ledgerService` so every account-scoped method accepts `accountCode`, `account`, or numeric `accountId`, while omitted account input still uses `default`.
+**Architecture:** Keep the existing `accounts` table and account-scoped tables as the data model. Add one account resolver inside `ledgerService` so every account-scoped method accepts `accountCode`, `account`, or numeric `accountId`; omitted account input must fail for account-owned reads and writes.
 
 **Tech Stack:** Node v22, Express, EJS, SQLite via `node:sqlite`, node:test, Supertest.
 
@@ -12,7 +12,8 @@
 
 - No login, auth, permission, or security workflow.
 - `accountCode` is the preferred external account selector for API query strings and JSON bodies.
-- Missing account input must continue to resolve to the existing `default` account.
+- Missing account input must return an error for account-owned reads and writes.
+- The original Codex account code/name is `account-codex`; legacy `default` accounts are migrated to this code.
 - Fund NAVs and market quotes remain global market data, not account-owned data.
 - Account-owned ledgers, decisions, orders, positions, snapshots, and cash entries must not leak across accounts.
 - Order numbers remain globally unique; generated order numbers include the account code to avoid cross-account collisions.
@@ -88,6 +89,6 @@
 
 - [x] Document account endpoints.
 - [x] Document accountCode query/body convention.
-- [x] Document default account compatibility and per-account game execution rules.
+- [x] Document required accountCode and per-account game execution rules.
 - [x] Run full tests.
 - [x] Commit and push with a Chinese commit message.

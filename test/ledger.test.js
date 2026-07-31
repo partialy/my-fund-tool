@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+const CODEX_ACCOUNT_CODE = 'account-codex';
+
 async function createLedgerFixture(name) {
   const root = path.join(os.tmpdir(), `fund-sim-tool-${name}-${Date.now()}`);
   await mkdir(root, { recursive: true });
@@ -42,6 +44,13 @@ function requireMethod(target, names) {
 }
 
 async function call(target, names, payload) {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return requireMethod(target, names)({
+      accountCode: CODEX_ACCOUNT_CODE,
+      ...payload,
+    });
+  }
+
   return requireMethod(target, names)(payload);
 }
 
@@ -112,6 +121,55 @@ function findPosition(balance, code) {
     return positionCode === code;
   });
 }
+
+test('setupDefaultAccount migrates legacy default account to account-codex', async () => {
+  const root = path.join(os.tmpdir(), `fund-sim-tool-default-migration-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+
+  const [{ openDatabase }, { initializeDatabase }, { createLedgerService }] =
+    await Promise.all([
+      import('../src/db/connection.js'),
+      import('../src/db/init.js'),
+      import('../src/services/ledgerService.js'),
+    ]);
+
+  const db = openDatabase(path.join(root, 'ledger.sqlite'));
+  try {
+    initializeDatabase(db);
+    db.prepare(
+      `INSERT INTO accounts (
+        code,
+        name,
+        initial_cash_cents,
+        cash_available_cents
+      ) VALUES (
+        'default',
+        '模拟账户',
+        1000000,
+        400000
+      )`,
+    ).run();
+
+    const ledger = createLedgerService(db);
+    ledger.setupDefaultAccount({
+      initialCash: '10000.00',
+      occurredAt: '2026-07-31T09:00:00+08:00',
+    });
+
+    const accounts = db.prepare('SELECT code, name FROM accounts ORDER BY id').all()
+      .map((account) => ({ ...account }));
+    assert.deepEqual(accounts, [{ code: 'account-codex', name: 'account-codex' }]);
+    assert.throws(() => ledger.getAccountBalance(), /account/i);
+    assert.equal(
+      ledger.getAccountBalance({ accountCode: CODEX_ACCOUNT_CODE }).accountCode,
+      CODEX_ACCOUNT_CODE,
+    );
+    assert.equal(ledger.getAccountBalance({ accountCode: CODEX_ACCOUNT_CODE }).cashAvailable, 4000);
+  } finally {
+    db.close?.();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('buy order confirmation decreases cash, confirms shares, and snapshots assets', async () => {
   const fixture = await createLedgerFixture('buy-flow');
