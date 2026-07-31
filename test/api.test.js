@@ -170,6 +170,297 @@ test('cash adjustment endpoint applies deposit, withdraw, and correction', async
   }
 });
 
+test('accounts endpoint creates and lists independent accounts', async () => {
+  const fixture = await createAppFixture('accounts');
+
+  try {
+    const created = unwrapBody(
+      await request(fixture.app)
+        .post('/api/accounts')
+        .send({
+          accountCode: 'alt',
+          name: '备用账户',
+          initialCash: '1234.00',
+          occurredAt: '2026-07-31T09:30:00+08:00',
+        })
+        .expect(200),
+    );
+
+    assert.equal(created.accountCode, 'alt');
+    assert.equal(created.name, '备用账户');
+    assert.equal(created.balance.cashAvailable, 1234);
+
+    const accounts = unwrapBody(await request(fixture.app).get('/api/accounts').expect(200));
+    assert.deepEqual(
+      accounts.map((account) => account.accountCode),
+      ['default', 'alt'],
+    );
+
+    const balance = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: 'alt' })
+        .expect(200),
+    );
+    assert.equal(balance.accountCode, 'alt');
+    assert.equal(balance.cashAvailable, 1234);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('accountCode isolates balances decisions orders and positions', async () => {
+  const fixture = await createAppFixture('account-isolation');
+
+  try {
+    await request(fixture.app)
+      .post('/api/accounts')
+      .send({
+        accountCode: 'alt',
+        name: '备用账户',
+        initialCash: '0.00',
+        occurredAt: '2026-07-31T09:00:00+08:00',
+      })
+      .expect(200);
+
+    const startingDefaultBalance = unwrapBody(
+      await request(fixture.app).get('/api/account/balance').expect(200),
+    );
+
+    for (const payload of [
+      {
+        type: 'deposit',
+        amount: '1000.00',
+        note: '默认账户入金',
+      },
+      {
+        accountCode: 'alt',
+        type: 'deposit',
+        amount: '2000.00',
+        note: '备用账户入金',
+      },
+    ]) {
+      unwrapBody(
+        await request(fixture.app)
+          .post('/api/account/cash-adjustments')
+          .send(payload)
+          .expect(200),
+      );
+    }
+
+    const defaultBalance = unwrapBody(
+      await request(fixture.app).get('/api/account/balance').expect(200),
+    );
+    const altBalance = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: 'alt' })
+        .expect(200),
+    );
+    assert.equal(defaultBalance.cashAvailable, startingDefaultBalance.cashAvailable + 1000);
+    assert.equal(altBalance.cashAvailable, 2000);
+
+    await request(fixture.app)
+      .post('/api/market/funds/A001/nav')
+      .send({
+        fundName: '测试基金A',
+        navDate: '2026-07-31',
+        nav: '1.0000',
+        source: '测试净值源',
+      })
+      .expect(200);
+
+    const defaultDecision = unwrapBody(
+      await request(fixture.app)
+        .post('/api/decisions')
+        .send({
+          decisionDate: '2026-07-31',
+          submittedAt: '2026-07-31T09:30:00+08:00',
+          action: 'buy',
+          fundCode: 'A001',
+          fundName: '测试基金A',
+          amount: '100.00',
+          reason: '默认账户买入',
+        })
+        .expect(200),
+    );
+    const altDecision = unwrapBody(
+      await request(fixture.app)
+        .post('/api/decisions')
+        .send({
+          accountCode: 'alt',
+          decisionDate: '2026-07-31',
+          submittedAt: '2026-07-31T09:35:00+08:00',
+          action: 'buy',
+          fundCode: 'A001',
+          fundName: '测试基金A',
+          amount: '200.00',
+          reason: '备用账户买入',
+        })
+        .expect(200),
+    );
+
+    const defaultToday = unwrapBody(
+      await request(fixture.app)
+        .get('/api/today')
+        .query({ date: '2026-07-31T10:00:00+08:00' })
+        .expect(200),
+    );
+    const altToday = unwrapBody(
+      await request(fixture.app)
+        .get('/api/today')
+        .query({ date: '2026-07-31T10:00:00+08:00', accountCode: 'alt' })
+        .expect(200),
+    );
+    assert.equal(defaultToday.decisionCount, 1);
+    assert.equal(altToday.decisionCount, 1);
+
+    const defaultOrder = unwrapBody(
+      await request(fixture.app)
+        .post('/api/orders')
+        .send({
+          decisionId: defaultDecision.id,
+          submittedAt: '2026-07-31T09:30:00+08:00',
+          side: 'buy',
+          fundCode: 'A001',
+          fundName: '测试基金A',
+          amount: '100.00',
+          tradeDate: '2026-07-31',
+          fee: '0.00',
+        })
+        .expect(200),
+    );
+    const altOrder = unwrapBody(
+      await request(fixture.app)
+        .post('/api/orders')
+        .send({
+          accountCode: 'alt',
+          decisionId: altDecision.id,
+          submittedAt: '2026-07-31T09:35:00+08:00',
+          side: 'buy',
+          fundCode: 'A001',
+          fundName: '测试基金A',
+          amount: '200.00',
+          tradeDate: '2026-07-31',
+          fee: '0.00',
+        })
+        .expect(200),
+    );
+
+    assert.match(defaultOrder.order_no, /^default-ORD-20260731-\d{4}$/);
+    assert.match(altOrder.order_no, /^alt-ORD-20260731-\d{4}$/);
+
+    await request(fixture.app)
+      .post(`/api/orders/${encodeURIComponent(defaultOrder.order_no)}/confirm`)
+      .send({
+        confirmDate: '2026-08-03',
+        settleDate: '2026-08-03',
+        nav: '1.0000',
+      })
+      .expect(200);
+    await request(fixture.app)
+      .post(`/api/orders/${encodeURIComponent(altOrder.order_no)}/confirm`)
+      .send({
+        accountCode: 'alt',
+        confirmDate: '2026-08-03',
+        settleDate: '2026-08-03',
+        nav: '1.0000',
+      })
+      .expect(200);
+
+    const mismatch = await request(fixture.app)
+      .post(`/api/orders/${encodeURIComponent(defaultOrder.order_no)}/confirm`)
+      .send({
+        accountCode: 'alt',
+        confirmDate: '2026-08-03',
+        settleDate: '2026-08-03',
+        nav: '1.0000',
+      });
+    assert.equal(mismatch.body.ok, false);
+
+    const defaultPositions = unwrapBody(
+      await request(fixture.app)
+        .get('/api/positions')
+        .query({ page: 1, pageSize: 10 })
+        .expect(200),
+    );
+    const altPositions = unwrapBody(
+      await request(fixture.app)
+        .get('/api/positions')
+        .query({ accountCode: 'alt', page: 1, pageSize: 10 })
+        .expect(200),
+    );
+    assert.equal(defaultPositions.items[0].marketValue, 100);
+    assert.equal(altPositions.items[0].marketValue, 200);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('account pages preserve accountCode in navigation and position history requests', async () => {
+  const fixture = await createAppFixture('account-page-code');
+
+  try {
+    const { ledger } = fixture.app.locals;
+    ledger.createAccount({
+      accountCode: 'alt',
+      name: '备用账户',
+      initialCash: '2000.00',
+      occurredAt: '2026-01-01T09:00:00+08:00',
+    });
+    ledger.writeFundNav({
+      code: 'A001',
+      fundName: '测试基金A',
+      navDate: '2026-01-02',
+      nav: '1.1000',
+      source: '测试净值源',
+    });
+    const decision = ledger.recordDecision({
+      accountCode: 'alt',
+      decisionDate: '2026-01-01',
+      submittedAt: '2026-01-01T14:30:00+08:00',
+      action: 'buy',
+      fundCode: 'A001',
+      fundName: '测试基金A',
+      amount: '1100.00',
+      reason: '备用账户测试买入',
+    });
+    const order = ledger.createOrder({
+      accountCode: 'alt',
+      decisionId: decision.id,
+      submittedAt: '2026-01-01T14:30:00+08:00',
+      side: 'buy',
+      fundCode: 'A001',
+      fundName: '测试基金A',
+      amount: '1100.00',
+      tradeDate: '2026-01-02',
+      fee: '0.00',
+    });
+    ledger.confirmOrder({
+      accountCode: 'alt',
+      orderNo: order.order_no,
+      confirmDate: '2026-01-03',
+      settleDate: '2026-01-03',
+      nav: '1.1000',
+    });
+    ledger.createSnapshot({ accountCode: 'alt', snapshotDate: '2026-01-02' });
+
+    const response = await request(fixture.app)
+      .get('/account')
+      .query({ accountCode: 'alt' })
+      .expect(200);
+    const $ = cheerio.load(response.text);
+
+    assert.equal($('select[name="accountCode"] option[selected][value="alt"]').length, 1);
+    assert.ok($('a[href="/?accountCode=alt"]').length > 0);
+    assert.ok($('a[href="/operations?accountCode=alt"]').length > 0);
+    assert.match(response.text, /accountCode=alt/);
+    assert.match(response.text, /historyUrl\.searchParams\.set\('accountCode', accountCode\)/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test('decisions endpoint returns a requested page with pagination metadata', async () => {
   const fixture = await createAppFixture('decision-pagination');
 

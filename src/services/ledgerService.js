@@ -31,10 +31,61 @@ function plain(row) {
 }
 
 function normalizeAccountId(value) {
-  if (value && typeof value === 'object') {
-    return value.accountId ?? value.account_id ?? value.id;
+  if (value === undefined || value === null || value === '') {
+    return null;
   }
-  return value;
+
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    throw new TypeError('accountId must be a positive integer.');
+  }
+
+  return numeric;
+}
+
+function normalizeAccountCode(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  return text || null;
+}
+
+function resolveAccountSelector(value) {
+  if (value && typeof value === 'object') {
+    return {
+      accountId: normalizeAccountId(value.accountId ?? value.account_id),
+      accountCode: normalizeAccountCode(value.accountCode ?? value.account_code ?? value.account)
+    };
+  }
+
+  if (typeof value === 'number') {
+    return { accountId: normalizeAccountId(value), accountCode: null };
+  }
+
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) {
+      return { accountId: null, accountCode: null };
+    }
+
+    return /^\d+$/.test(text)
+      ? { accountId: normalizeAccountId(text), accountCode: null }
+      : { accountId: null, accountCode: normalizeAccountCode(text) };
+  }
+
+  return { accountId: null, accountCode: null };
+}
+
+function hasAccountSelector(value) {
+  const selector = resolveAccountSelector(value);
+  return selector.accountId !== null || selector.accountCode !== null;
+}
+
+function orderAccountPrefix(accountCode) {
+  const normalized = normalizeAccountCode(accountCode) ?? DEFAULT_ACCOUNT_CODE;
+  return normalized.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || DEFAULT_ACCOUNT_CODE;
 }
 
 function readCents(input, keys, defaultValue = null) {
@@ -89,6 +140,8 @@ function pickInput(input, ...keys) {
 function paginationInput(input, pageKeys, pageSizeKeys) {
   return {
     accountId: input.accountId ?? input.account_id,
+    accountCode: input.accountCode ?? input.account_code,
+    account: input.account,
     paginated: true,
     page: pickInput(input, ...pageKeys, 'page'),
     pageSize: pickInput(input, ...pageSizeKeys, 'pageSize', 'page_size')
@@ -165,15 +218,105 @@ export function createLedgerService(db) {
     return get('SELECT * FROM accounts WHERE code = :code', { code: DEFAULT_ACCOUNT_CODE });
   }
 
-  function requireAccount(accountId) {
-    const normalized = normalizeAccountId(accountId);
-    const account = normalized
-      ? get('SELECT * FROM accounts WHERE id = :id', { id: normalized })
-      : getDefaultAccount();
+  function getAccountByCode(code) {
+    const accountCode = normalizeAccountCode(code);
+    return accountCode ? get('SELECT * FROM accounts WHERE code = :code', { code: accountCode }) : null;
+  }
+
+  function requireAccount(input) {
+    const selector = resolveAccountSelector(input);
+    const account = selector.accountId
+      ? get('SELECT * FROM accounts WHERE id = :id', { id: selector.accountId })
+      : selector.accountCode
+        ? getAccountByCode(selector.accountCode)
+        : getDefaultAccount();
 
     if (!account) {
-      throw new Error('Account is not initialized.');
+      const requested = selector.accountCode ?? selector.accountId;
+      throw new Error(requested ? `Account not found: ${requested}` : 'Account is not initialized.');
     }
+
+    return account;
+  }
+
+  function formatAccount(account) {
+    if (!account) {
+      return null;
+    }
+
+    return {
+      ...account,
+      accountId: account.id,
+      accountCode: account.code,
+      accountName: account.name,
+      initialCash: centsToMoney(account.initial_cash_cents),
+      cashAvailable: centsToMoney(account.cash_available_cents),
+      cashFrozen: centsToMoney(account.cash_frozen_cents),
+      cashTotal: centsToMoney(account.cash_available_cents + account.cash_frozen_cents)
+    };
+  }
+
+  function accountView(account) {
+    return {
+      ...formatAccount(account),
+      balance: getAccountBalance(account.id)
+    };
+  }
+
+  function insertAccount(input = {}) {
+    const code = normalizeAccountCode(
+      input.accountCode ?? input.account_code ?? input.code ?? input.account
+    );
+    if (!code) {
+      throw new Error('Account code is required.');
+    }
+
+    const initialCashCents = readCents(
+      input,
+      ['initialCashCents', 'initial_cash_cents', 'initialCash', 'cash'],
+      DEFAULT_INITIAL_CASH_CENTS
+    );
+    const limit = Number(input.dailyDecisionLimit ?? input.daily_decision_limit ?? 3);
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new RangeError('dailyDecisionLimit must be a positive integer.');
+    }
+
+    run(
+      `INSERT INTO accounts (
+        code,
+        name,
+        currency,
+        initial_cash_cents,
+        cash_available_cents,
+        daily_decision_limit
+      ) VALUES (
+        :code,
+        :name,
+        :currency,
+        :initialCashCents,
+        :initialCashCents,
+        :limit
+      )`,
+      {
+        code,
+        name: input.name ?? input.accountName ?? input.account_name ?? code,
+        currency: input.currency ?? 'CNY',
+        initialCashCents,
+        limit
+      }
+    );
+
+    const account = getAccountByCode(code);
+    insertCashLedger({
+      account,
+      occurredAt: toLocalDateTime(input.occurredAt ?? input.occurred_at ?? new Date()),
+      type: 'deposit',
+      direction: 'in',
+      amountCents: initialCashCents,
+      balanceBeforeCents: 0,
+      balanceAfterCents: initialCashCents,
+      note: input.note ?? '默认初始资金'
+    });
 
     return account;
   }
@@ -410,11 +553,34 @@ export function createLedgerService(db) {
     });
   }
 
-  function getAccountBalance(accountId) {
-    const account = requireAccount(accountId);
+  function createAccount(input = {}) {
+    return transaction(() => {
+      const code = normalizeAccountCode(
+        input.accountCode ?? input.account_code ?? input.code ?? input.account
+      );
+      if (!code) {
+        throw new Error('Account code is required.');
+      }
+
+      const existing = getAccountByCode(code);
+      return accountView(existing ?? insertAccount({ ...input, accountCode: code }));
+    });
+  }
+
+  function listAccounts() {
+    return all(
+      `SELECT *
+       FROM accounts
+       ORDER BY id ASC`
+    ).map(accountView);
+  }
+
+  function getAccountBalance(input) {
+    const account = requireAccount(input);
     return {
       accountId: account.id,
       accountCode: account.code,
+      accountName: account.name,
       cashAvailableCents: account.cash_available_cents,
       cashFrozenCents: account.cash_frozen_cents,
       cashTotalCents: account.cash_available_cents + account.cash_frozen_cents,
@@ -426,6 +592,7 @@ export function createLedgerService(db) {
 
   function adjustCash(input = {}) {
     return transaction(() => {
+      const account = requireAccount(input);
       const type = input.type;
       if (!['deposit', 'withdraw', 'correction'].includes(type)) {
         throw new Error('Cash adjustment type must be deposit, withdraw, or correction.');
@@ -439,7 +606,7 @@ export function createLedgerService(db) {
       );
 
       return applyCashChange({
-        accountId: input.accountId ?? input.account_id,
+        accountId: account.id,
         type,
         amountCents,
         targetBalanceCents,
@@ -663,7 +830,7 @@ export function createLedgerService(db) {
 
   function recordDecision(input = {}) {
     return transaction(() => {
-      const account = requireAccount(input.accountId ?? input.account_id);
+      const account = requireAccount(input);
       const submittedAt = toLocalDateTime(input.submittedAt ?? input.submitted_at ?? new Date());
       const decisionDate = toLocalDate(input.decisionDate ?? input.decision_date ?? submittedAt);
       const action = String(input.action ?? input.kind ?? input.type ?? '').trim();
@@ -757,8 +924,8 @@ export function createLedgerService(db) {
     });
   }
 
-  function makeOrderNo(date) {
-    const prefix = `ORD-${date.replaceAll('-', '')}`;
+  function makeOrderNo(accountCode, date) {
+    const prefix = `${orderAccountPrefix(accountCode)}-ORD-${date.replaceAll('-', '')}`;
     const row = get(
       `SELECT COUNT(*) AS count
        FROM orders
@@ -770,7 +937,7 @@ export function createLedgerService(db) {
 
   function createOrder(input = {}) {
     return transaction(() => {
-      const account = requireAccount(input.accountId ?? input.account_id);
+      const account = requireAccount(input);
       const fund = ensureFund(input);
       const side = String(input.side ?? input.action ?? '').trim();
       if (!['buy', 'sell'].includes(side)) {
@@ -782,8 +949,17 @@ export function createLedgerService(db) {
       const amountCents = readCents(input, ['amountCents', 'amount_cents', 'amount'], null);
       const sharesInt = readInt(input, ['sharesInt', 'shares_int'], ['shares'], sharesToInt, null);
       const feeCents = readCents(input, ['feeCents', 'fee_cents', 'fee'], 0);
-      const orderNo = input.orderNo ?? input.order_no ?? makeOrderNo(tradeDate);
+      const orderNo = input.orderNo ?? input.order_no ?? makeOrderNo(account.code, tradeDate);
       const decisionId = input.decisionId ?? input.decision_id ?? null;
+      if (decisionId) {
+        const decision = get('SELECT id, account_id FROM decisions WHERE id = :decisionId', { decisionId });
+        if (!decision) {
+          throw new Error(`Decision not found: ${decisionId}`);
+        }
+        if (decision.account_id !== account.id) {
+          throw new Error(`Decision ${decisionId} does not belong to account ${account.code}.`);
+        }
+      }
 
       if (side === 'buy') {
         assertPositiveInteger(amountCents, 'amountCents');
@@ -854,8 +1030,8 @@ export function createLedgerService(db) {
         run(
           `UPDATE decisions
            SET order_no = :orderNo, status = 'ordered'
-           WHERE id = :decisionId`,
-          { orderNo, decisionId }
+           WHERE id = :decisionId AND account_id = :accountId`,
+          { orderNo, decisionId, accountId: account.id }
         );
       }
 
@@ -969,6 +1145,17 @@ export function createLedgerService(db) {
     };
   }
 
+  function assertOrderAccountInput(order, input) {
+    if (!hasAccountSelector(input)) {
+      return;
+    }
+
+    const account = requireAccount(input);
+    if (account.id !== order.account_id) {
+      throw new Error(`Order ${order.order_no} does not belong to account ${account.code}.`);
+    }
+  }
+
   function confirmOrder(orderNoOrInput, maybeInput = {}) {
     const orderNo = typeof orderNoOrInput === 'object'
       ? orderNoOrInput.orderNo ?? orderNoOrInput.order_no
@@ -980,6 +1167,7 @@ export function createLedgerService(db) {
       if (!order) {
         throw new Error(`Order not found: ${orderNo}`);
       }
+      assertOrderAccountInput(order, input);
       if (order.status !== 'submitted') {
         throw new Error(`Only submitted orders can be confirmed. Current status: ${order.status}`);
       }
@@ -1057,6 +1245,7 @@ export function createLedgerService(db) {
       if (!order) {
         throw new Error(`Order not found: ${orderNo}`);
       }
+      assertOrderAccountInput(order, input);
       if (order.status !== 'confirmed') {
         throw new Error(`Only confirmed orders can be settled. Current status: ${order.status}`);
       }
@@ -1120,7 +1309,7 @@ export function createLedgerService(db) {
 
   function createSnapshot(input = {}) {
     return transaction(() => {
-      const account = requireAccount(input.accountId ?? input.account_id);
+      const account = requireAccount(input);
       const snapshotDate = toLocalDate(input.snapshotDate ?? input.snapshot_date ?? input.date ?? new Date());
       const positions = all(
         `SELECT *
@@ -1262,7 +1451,7 @@ export function createLedgerService(db) {
   function getToday(input = {}) {
     const submittedAt = input.submittedAt ?? input.submitted_at ?? input.date ?? new Date();
     const today = toLocalDate(submittedAt);
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     const decisionCount = get(
       `SELECT COUNT(*) AS count
        FROM decisions
@@ -1283,7 +1472,7 @@ export function createLedgerService(db) {
   }
 
   function listPositions(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     return listRows({
       input,
       selectSql: `SELECT
@@ -1321,7 +1510,7 @@ export function createLedgerService(db) {
   }
 
   function getPositionHistory(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     const fundCode = input.fundCode ?? input.fund_code ?? input.code;
     if (!fundCode) {
       throw new Error('Fund code is required.');
@@ -1409,7 +1598,7 @@ export function createLedgerService(db) {
   }
 
   function getAccountSummary(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     const balance = getAccountBalance(account.id);
     const positions = listPositions({ accountId: account.id });
     const positionsMarketValueCents = positions.reduce((sum, position) => sum + position.market_value_cents, 0);
@@ -1435,7 +1624,7 @@ export function createLedgerService(db) {
   }
 
   function listOrders(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     return listRows({
       input,
       selectSql: `SELECT
@@ -1453,7 +1642,7 @@ export function createLedgerService(db) {
   }
 
   function listDecisions(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     return listRows({
       input,
       selectSql: `SELECT
@@ -1471,7 +1660,7 @@ export function createLedgerService(db) {
   }
 
   function listPnlEntries(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     return listRows({
       input,
       selectSql: `SELECT
@@ -1489,7 +1678,7 @@ export function createLedgerService(db) {
   }
 
   function listCashLedger(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     return listRows({
       input,
       selectSql: `SELECT *
@@ -1504,7 +1693,7 @@ export function createLedgerService(db) {
   }
 
   function listSnapshots(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     return listRows({
       input,
       selectSql: `SELECT *
@@ -1534,6 +1723,21 @@ export function createLedgerService(db) {
       href: row.note ? `/actions/${row.note}` : `/actions/${row.id}`,
       legacyPath: row.legacy_path
     };
+  }
+
+  function hrefWithAccount(href, accountCode) {
+    if (!href || href === '#') {
+      return href;
+    }
+
+    const url = new URL(href, 'http://fund-sim.local');
+    url.searchParams.set('accountCode', accountCode);
+    return `${url.pathname}${url.search}`;
+  }
+
+  function enrichDecisionForAccount(row, account) {
+    const decision = enrichDecision(row);
+    return decision ? { ...decision, href: hrefWithAccount(decision.href, account.code) } : decision;
   }
 
   function enrichOrder(row) {
@@ -1569,8 +1773,16 @@ export function createLedgerService(db) {
     };
   }
 
+  function accountPageContext(account) {
+    return {
+      accounts: listAccounts(),
+      currentAccount: formatAccount(account),
+      accountCode: account.code
+    };
+  }
+
   function buildAccountViewModel(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     const summary = getAccountSummary({ accountId: account.id });
     const cashPage = listCashLedger(paginationInput(
       { ...input, accountId: account.id },
@@ -1584,6 +1796,7 @@ export function createLedgerService(db) {
     ));
     return {
       ...summary,
+      ...accountPageContext(account),
       positions: listPositions({ accountId: account.id }),
       cashLedger: pageItems(cashPage),
       cashPagination: pageMeta(cashPage),
@@ -1593,7 +1806,7 @@ export function createLedgerService(db) {
   }
 
   function getDashboardViewModel(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     const accountModel = buildAccountViewModel({ accountId: account.id });
     const today = getToday({
       accountId: account.id,
@@ -1604,7 +1817,7 @@ export function createLedgerService(db) {
       paginated: true,
       pageSize: 10
     });
-    const decisions = pageItems(decisionsPage).map(enrichDecision);
+    const decisions = pageItems(decisionsPage).map((row) => enrichDecisionForAccount(row, account));
     const summary = {
       ...accountModel,
       ...accountModel.balance,
@@ -1627,7 +1840,7 @@ export function createLedgerService(db) {
   }
 
   function getOperationsViewModel(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     const decisionsPage = listDecisions(paginationInput(
       { ...input, accountId: account.id },
       ['decisionPage', 'decision_page', 'decisionsPage', 'decisions_page'],
@@ -1643,8 +1856,9 @@ export function createLedgerService(db) {
       ['cashPage', 'cash_page'],
       ['cashPageSize', 'cash_page_size'],
     ));
-    const decisions = pageItems(decisionsPage).map(enrichDecision);
+    const decisions = pageItems(decisionsPage).map((row) => enrichDecisionForAccount(row, account));
     return {
+      ...accountPageContext(account),
       decisions,
       decisionPagination: pageMeta(decisionsPage),
       actions: decisions,
@@ -1656,7 +1870,7 @@ export function createLedgerService(db) {
   }
 
   function getPnlViewModel(input = {}) {
-    const account = requireAccount(input.accountId ?? input.account_id);
+    const account = requireAccount(input);
     const summary = getAccountSummary({ accountId: account.id });
     const positions = listPositions({ accountId: account.id });
     const unrealizedPnlCents = positions.reduce(
@@ -1672,6 +1886,7 @@ export function createLedgerService(db) {
     const pnlEntries = pageItems(pnlPage).map((row) => enrichPnlEntry(row, account));
 
     return {
+      ...accountPageContext(account),
       summary: {
         ...summary,
         accumulatedPnlCents: totalPnlCents,
@@ -1688,22 +1903,30 @@ export function createLedgerService(db) {
   }
 
   function getDecisionDetail(idOrInput) {
-    const id = typeof idOrInput === 'object' ? idOrInput.id : idOrInput;
+    const input = typeof idOrInput === 'object' ? idOrInput : { id: idOrInput };
+    const id = input.id ?? input.decisionId ?? input.decision_id ?? input.note;
+    const selectedAccount = requireAccount(input);
+    const params = { id, accountId: selectedAccount.id };
     const decision = get(
       `SELECT
          d.*,
          f.name AS fund_name
        FROM decisions d
        LEFT JOIN funds f ON f.code = d.fund_code
-       WHERE d.id = :id OR d.note = :id`,
-      { id }
+       WHERE (d.id = :id OR d.note = :id)
+         AND d.account_id = :accountId`,
+      params
     );
     if (!decision) {
       return null;
     }
 
+    const account = selectedAccount;
     const order = decision.order_no
-      ? get('SELECT * FROM orders WHERE order_no = :orderNo', { orderNo: decision.order_no })
+      ? get(
+          'SELECT * FROM orders WHERE order_no = :orderNo AND account_id = :accountId',
+          { orderNo: decision.order_no, accountId: account.id }
+        )
       : null;
     const sourceRefs = all(
       `SELECT sr.*, ds.name AS source_name, ds.url AS source_url
@@ -1715,6 +1938,7 @@ export function createLedgerService(db) {
     );
 
     return {
+      ...accountPageContext(account),
       decision: enrichDecision(decision),
       action: enrichDecision(decision),
       order: enrichOrder(order),
@@ -1728,6 +1952,8 @@ export function createLedgerService(db) {
 
   return {
     setupDefaultAccount,
+    createAccount,
+    listAccounts,
     getAccountBalance,
     adjustCash,
     upsertFund,

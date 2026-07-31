@@ -41,6 +41,8 @@ git config --global https.proxy http://192.168.9.100:10809
 ## 核心接口
 
 - `GET /api/today?date=YYYY-MM-DD`
+- `GET /api/accounts`
+- `POST /api/accounts`
 - `GET /api/account/balance`
 - `GET /api/positions?page=1&pageSize=10`
 - `GET /api/positions/:fundCode/history?page=1&pageSize=20`
@@ -58,6 +60,25 @@ git config --global https.proxy http://192.168.9.100:10809
 - `POST /api/orders/:orderNo/settle`
 - `POST /api/valuation/snapshot`
 - `POST /api/import/legacy`
+
+## 多账户
+
+多账户模式不做登录和权限。账本归属类接口均支持 `accountCode`，GET 接口放在 query，POST 接口可放在 JSON body 或 query；不传时仍使用 `default` 账户。市场数据接口 `/api/market/funds/:code/nav` 和 `/api/market/quotes` 是全局行情数据，不按账户隔离。
+
+创建账户示例：
+
+```http
+POST /api/accounts
+Content-Type: application/json
+
+{
+  "accountCode": "alt",
+  "name": "备用账户",
+  "initialCash": "10000.00"
+}
+```
+
+自动生成订单号会加入账户前缀，例如 `default-ORD-20260731-0001`、`alt-ORD-20260731-0001`。手动指定 `orderNo` 时仍需保证全局唯一。
 
 列表接口默认分页，返回 `{ items, pagination }`，`pageSize` 默认 10，最大 100。页面表格默认展示最新 10 条，并通过分页条手动翻页。
 

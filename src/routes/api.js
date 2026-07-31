@@ -2,6 +2,8 @@ import express from 'express';
 
 const LEDGER_METHODS = {
   today: ['getToday', 'getTodayState', 'getTradingDayInfo', 'resolveToday'],
+  accounts: ['listAccounts', 'getAccounts'],
+  createAccount: ['createAccount', 'addAccount'],
   account: ['getAccount', 'getAccountSummary', 'getAccountOverview'],
   balance: ['getAccountBalance', 'getBalance', 'getBalanceSummary'],
   cashAdjustment: ['createCashAdjustment', 'recordCashAdjustment', 'adjustCash'],
@@ -46,6 +48,16 @@ export function createApiRouter({ ledger, db, importLegacyData } = {}) {
 
   router.get('/today', asyncHandler(async (request, response) => {
     const data = await callLedger(ledger, LEDGER_METHODS.today, queryPayload(request));
+    sendSuccessResponse(response, data);
+  }));
+
+  router.get('/accounts', asyncHandler(async (_request, response) => {
+    const data = await callLedger(ledger, LEDGER_METHODS.accounts, {});
+    sendSuccessResponse(response, data);
+  }));
+
+  router.post('/accounts', asyncHandler(async (request, response) => {
+    const data = await callLedger(ledger, LEDGER_METHODS.createAccount, bodyWithQueryPayload(request));
     sendSuccessResponse(response, data);
   }));
 
@@ -123,17 +135,17 @@ export function createApiRouter({ ledger, db, importLegacyData } = {}) {
   }));
 
   router.post('/decisions', asyncHandler(async (request, response) => {
-    const data = await callLedger(ledger, LEDGER_METHODS.decision, bodyPayload(request));
+    const data = await callLedger(ledger, LEDGER_METHODS.decision, bodyWithQueryPayload(request));
     sendSuccessResponse(response, data);
   }));
 
   router.post('/orders', asyncHandler(async (request, response) => {
-    const data = await callLedger(ledger, LEDGER_METHODS.order, bodyPayload(request));
+    const data = await callLedger(ledger, LEDGER_METHODS.order, bodyWithQueryPayload(request));
     sendSuccessResponse(response, data);
   }));
 
   router.post('/orders/:orderNo/confirm', asyncHandler(async (request, response) => {
-    const payload = bodyWithParams(request, { orderNo: request.params.orderNo });
+    const payload = bodyWithQueryAndParams(request, { orderNo: request.params.orderNo });
     const data = await callLedger(
       ledger,
       LEDGER_METHODS.confirmOrder,
@@ -144,7 +156,7 @@ export function createApiRouter({ ledger, db, importLegacyData } = {}) {
   }));
 
   router.post('/orders/:orderNo/settle', asyncHandler(async (request, response) => {
-    const payload = bodyWithParams(request, { orderNo: request.params.orderNo });
+    const payload = bodyWithQueryAndParams(request, { orderNo: request.params.orderNo });
     const data = await callLedger(
       ledger,
       LEDGER_METHODS.settleOrder,
@@ -155,7 +167,7 @@ export function createApiRouter({ ledger, db, importLegacyData } = {}) {
   }));
 
   router.post('/valuation/snapshot', asyncHandler(async (request, response) => {
-    const data = await callLedger(ledger, LEDGER_METHODS.snapshot, bodyPayload(request));
+    const data = await callLedger(ledger, LEDGER_METHODS.snapshot, bodyWithQueryPayload(request));
     sendSuccessResponse(response, data);
   }));
 
@@ -268,8 +280,23 @@ function bodyWithParams(request, params) {
   return { ...params, value: body };
 }
 
-function cashAdjustmentPayload(request) {
+function bodyWithQueryPayload(request) {
   const body = bodyPayload(request);
+
+  if (isPlainObject(body)) {
+    return { ...request.query, ...body };
+  }
+
+  return { ...request.query, value: body };
+}
+
+function bodyWithQueryAndParams(request, params) {
+  const body = bodyWithQueryPayload(request);
+  return { ...body, ...params };
+}
+
+function cashAdjustmentPayload(request) {
+  const body = bodyWithQueryPayload(request);
 
   if (!isPlainObject(body) || body.type !== 'correction') {
     return body;

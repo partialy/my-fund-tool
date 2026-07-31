@@ -72,4 +72,16 @@ pnpm test
 pnpm dev
 ```
 
+## 多账户口径
+
+- 当前工具支持轻量多账户，不做登录、鉴权或安全隔离。
+- 外部调用优先使用 `accountCode` 选择账户；GET 接口放 query，POST 接口可放 JSON body 或 query。
+- 未传 `accountCode` 时默认使用 `default` 账户，保持旧流程兼容。
+- `accounts` 是账户主表；`cash_ledger`、`decisions`、`orders`、`positions`、`account_snapshots`、`pnl_entries` 以 `account_id` 隔离。
+- `fund_navs` 和 `market_quotes` 是全局行情数据，不按账户重复存储。
+- 新增账号使用 `POST /api/accounts`；查看账号使用 `GET /api/accounts`。
+- 自动生成订单号带账户前缀，例如 `default-ORD-20260731-0001`、`alt-ORD-20260731-0001`；手动传 `orderNo` 时仍需保证全局唯一。
+- 页面顶部有账户下拉框；导航、分页、操作详情和持仓明细请求都应保留当前 `accountCode`。
+
+
 默认服务端口：`53999`；服务默认监听 `0.0.0.0:53999`，可通过 `HOST` / `PORT` 环境变量覆盖。

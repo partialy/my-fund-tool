@@ -283,6 +283,7 @@ const fundCodeOf = (row) => pick(row, 'fundCode', 'fund_code', 'code') || '';
       const rows = document.querySelector('[data-position-history-rows]');
       const buttons = document.querySelectorAll('[data-position-history-button]');
       const closeButtons = document.querySelectorAll('[data-position-history-close]');
+      const accountCode = <%- JSON.stringify(summary.accountCode || summary.currentAccount?.accountCode || query?.accountCode || '') %>;
 
       if (!modal || !title || !status || !rows) return;
 
@@ -362,7 +363,13 @@ const fundCodeOf = (row) => pick(row, 'fundCode', 'fund_code', 'code') || '';
         openModal();
 
         try {
-          const response = await fetch(`/api/positions/${encodeURIComponent(fundCode)}/history?page=1&pageSize=20`);
+          const historyUrl = new URL(`/api/positions/${encodeURIComponent(fundCode)}/history`, window.location.origin);
+          historyUrl.searchParams.set('page', '1');
+          historyUrl.searchParams.set('pageSize', '20');
+          if (accountCode) {
+            historyUrl.searchParams.set('accountCode', accountCode);
+          }
+          const response = await fetch(historyUrl);
           if (!response.ok) throw new Error(`请求失败：${response.status}`);
           const payload = await response.json();
           const items = Array.isArray(payload?.data?.items)

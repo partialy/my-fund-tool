@@ -1,6 +1,23 @@
 <%
 const safeActive = typeof active !== 'undefined' ? active : '';
 const appLabel = typeof appName !== 'undefined' && appName ? appName : '基金模拟工具';
+const vm = typeof data !== 'undefined' && data ? data : {};
+const queryParams = typeof query !== 'undefined' && query ? query : {};
+const accounts = Array.isArray(vm.accounts) ? vm.accounts : [];
+const currentAccountCode = String(
+  vm.currentAccount?.accountCode
+    ?? vm.accountCode
+    ?? queryParams.accountCode
+    ?? queryParams.account_code
+    ?? 'default'
+);
+const withAccount = (href) => {
+  const url = new URL(href, 'http://fund-sim.local');
+  if (currentAccountCode) {
+    url.searchParams.set('accountCode', currentAccountCode);
+  }
+  return `${url.pathname}${url.search}`;
+};
 const navItems = [
   { key: 'dashboard', href: '/', label: '总览' },
   { key: 'account', href: '/account', label: '账户' },
@@ -9,16 +26,43 @@ const navItems = [
 ];
 %>
 <header class="topbar">
-  <a class="brand" href="/" aria-label="返回总览">
+  <a class="brand" href="<%= withAccount('/') %>" aria-label="返回总览">
     <span class="brand-mark">基</span>
     <span>
       <strong><%= appLabel %></strong>
       <small>基金模拟账本</small>
     </span>
   </a>
-  <nav class="nav-links" aria-label="主导航">
-    <% navItems.forEach((item) => { %>
-      <a class="<%= safeActive === item.key ? 'is-active' : '' %>" href="<%= item.href %>"><%= item.label %></a>
-    <% }) %>
-  </nav>
+  <div class="topbar-actions">
+    <% if (accounts.length) { %>
+      <label class="account-switcher">
+        <span>账户</span>
+        <select name="accountCode" data-account-switcher>
+          <% accounts.forEach((account) => { %>
+            <% const code = String(account.accountCode || account.code || ''); %>
+            <option value="<%= code %>" <%= code === currentAccountCode ? 'selected' : '' %>>
+              <%= account.accountName || account.name || code %>
+            </option>
+          <% }) %>
+        </select>
+      </label>
+    <% } %>
+    <nav class="nav-links" aria-label="主导航">
+      <% navItems.forEach((item) => { %>
+        <a class="<%= safeActive === item.key ? 'is-active' : '' %>" href="<%= withAccount(item.href) %>"><%= item.label %></a>
+      <% }) %>
+    </nav>
+  </div>
 </header>
+<script>
+  (() => {
+    const switcher = document.querySelector('[data-account-switcher]');
+    if (!switcher) return;
+
+    switcher.addEventListener('change', () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set('accountCode', switcher.value);
+      window.location.href = `${url.pathname}${url.search}`;
+    });
+  })();
+</script>
