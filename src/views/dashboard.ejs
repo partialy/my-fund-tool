@@ -50,6 +50,11 @@ const pctFrom = (obj, keys, ppmKeys = []) => {
   const ppm = pick(obj, ...ppmKeys);
   return pct(ppm === undefined ? undefined : Number(ppm) / 1000000);
 };
+const operationSuggestion = (obj) => {
+  const count = pick(obj, 'decisionCount', 'decision_count') ?? '--';
+  const suggestion = pick(obj, 'suggestedDecisionLimit', 'suggested_decision_limit', 'decisionLimit', 'decision_limit');
+  return suggestion === undefined ? `基金操作 ${count} 次` : `基金操作 ${count} 次 · 建议 ${suggestion} 次`;
+};
 const tone = (value) => {
   const n = Number(value);
   return !Number.isFinite(n) || n === 0 ? 'muted' : n > 0 ? 'positive' : 'negative';
@@ -116,7 +121,7 @@ const actionHref = (row) => {
         <article class="metric-card">
           <span>今日盈亏</span>
           <strong class="num <%= tone(pick(summary, 'todayPnl', 'today_pnl', 'dailyPnl', 'daily_pnl')) %>"><%= moneyFrom(summary, ['todayPnl', 'today_pnl', 'dailyPnl', 'daily_pnl'], ['todayPnlCents', 'today_pnl_cents', 'dailyPnlCents', 'daily_pnl_cents']) %></strong>
-          <small><%= pctFrom(summary, ['todayPnlRate', 'today_pnl_rate', 'dailyPnlRate', 'daily_pnl_rate'], ['todayPnlPpm', 'today_pnl_ppm']) %> · 决策 <%= pick(summary, 'decisionCount', 'decision_count') ?? '--' %>/<%= pick(summary, 'decisionLimit', 'decision_limit') ?? '--' %></small>
+          <small><%= pctFrom(summary, ['todayPnlRate', 'today_pnl_rate', 'dailyPnlRate', 'daily_pnl_rate'], ['todayPnlPpm', 'today_pnl_ppm']) %> · <%= operationSuggestion(summary) %></small>
         </article>
       </section>
 

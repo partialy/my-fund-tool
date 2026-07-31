@@ -68,6 +68,10 @@ git config --global https.proxy http://192.168.9.100:10809
 
 外部模型可以自行联网搜索其他基金并独立决策，不限制在其他模型已买基金里；也可以保持空仓或只观察。公开行情和候选基金数据优先由外部模型自行搜索，只有确实无法访问或需要本地账本/复核时，才让 Codex 按清单代取。虽然是游戏，但账本按真实基金盘数据和真实交易规则模拟，提交前需要谨慎核对；`submitted` 状态订单可在确认前通过 `POST /api/orders/:orderNo/cancel` 撤回。
 
+数据查询、行情搜索、资料复核、页面/API 读取都不限次数，也不计入操作次数。只有 `buy`、`sell`、`switch`、`cancel_order` 这类真实基金操作计入“基金操作次数”；`hold`、净值更新、确认、到账、快照和现金调整默认不计数。每日 3 次只是建议操作节奏，不是硬上限，工具不会因为超过 3 次而拒绝写入。
+
+`/api/today` 中的 `decisionLimit` / `suggestedDecisionLimit` 表示建议操作次数；`limitEnforced=false` 表示服务端不按该值拦截。
+
 ## 多账户
 
 多账户模式不做登录和权限。账本归属类接口必须显式传 `accountCode` 或 `accountId`，GET 接口放在 query，POST 接口可放在 JSON body 或 query；缺少账户参数会直接返回错误。页面入口在未传账户时默认展示 Codex 账户。Codex 当前账户代码为 `account-codex`。市场数据接口 `/api/market/funds/:code/nav` 和 `/api/market/quotes` 是全局行情数据，不按账户隔离。

@@ -171,6 +171,66 @@ test('setupDefaultAccount migrates legacy default account to account-codex', asy
   }
 });
 
+test('database initialization normalizes legacy non-fund operation counts', async () => {
+  const fixture = await createLedgerFixture('non-fund-count-migration');
+
+  try {
+    const { initializeDatabase } = await import('../src/db/init.js');
+    const account = fixture.db
+      .prepare('SELECT id FROM accounts WHERE code = :code')
+      .get({ code: CODEX_ACCOUNT_CODE });
+    const insertDecision = fixture.db.prepare(
+      `INSERT INTO decisions (
+        account_id,
+        decision_date,
+        submitted_at,
+        action,
+        reason,
+        counts_daily,
+        daily_sequence,
+        status
+      ) VALUES (
+        :accountId,
+        '2026-07-28',
+        :submittedAt,
+        :action,
+        :reason,
+        1,
+        :dailySequence,
+        'recorded'
+      )`,
+    );
+
+    insertDecision.run({
+      accountId: account.id,
+      submittedAt: '2026-07-28 09:30:00',
+      action: 'hold',
+      reason: '历史观察记录',
+      dailySequence: 1,
+    });
+    insertDecision.run({
+      accountId: account.id,
+      submittedAt: '2026-07-28 10:30:00',
+      action: 'buy',
+      reason: '历史买入记录',
+      dailySequence: 2,
+    });
+
+    initializeDatabase(fixture.db);
+
+    const rows = fixture.db
+      .prepare('SELECT action, counts_daily, daily_sequence FROM decisions ORDER BY id ASC')
+      .all()
+      .map((row) => ({ ...row }));
+    assert.deepEqual(rows, [
+      { action: 'hold', counts_daily: 0, daily_sequence: null },
+      { action: 'buy', counts_daily: 1, daily_sequence: 1 },
+    ]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test('buy order confirmation decreases cash, confirms shares, and snapshots assets', async () => {
   const fixture = await createLedgerFixture('buy-flow');
 
@@ -251,7 +311,7 @@ test('buy order confirmation decreases cash, confirms shares, and snapshots asse
   }
 });
 
-test('counted decisions are limited to three per local date', async () => {
+test('counted decisions use three as a suggestion without blocking more operations', async () => {
   const fixture = await createLedgerFixture('daily-limit');
 
   try {
@@ -259,23 +319,57 @@ test('counted decisions are limited to three per local date', async () => {
       await call(fixture.ledger, ['recordDecision', 'createDecision'], {
         decisionNo: `20260728-00${index + 1}`,
         submittedAt: `2026-07-28T${time}+08:00`,
-        action: 'hold',
-        reason: `第 ${index + 1} 次不操作`,
+        action: 'buy',
+        reason: `第 ${index + 1} 次基金操作`,
         countsDaily: true,
       });
     }
 
-    await assert.rejects(
-      () =>
-        call(fixture.ledger, ['recordDecision', 'createDecision'], {
-          decisionNo: '20260728-004',
-          submittedAt: '2026-07-28T14:59:59+08:00',
-          action: 'hold',
-          reason: '超过每日次数限制的不操作',
-          countsDaily: true,
-        }),
-      /daily|limit|decision|次数|上限|最多|3/i,
-    );
+    const fourth = await call(fixture.ledger, ['recordDecision', 'createDecision'], {
+      decisionNo: '20260728-004',
+      submittedAt: '2026-07-28T14:59:59+08:00',
+      action: 'buy',
+      reason: '第 4 次基金操作仍允许记录',
+      countsDaily: true,
+    });
+
+    assert.equal(fourth.counts_daily, 1);
+    assert.equal(fourth.daily_sequence, 4);
+
+    const today = await call(fixture.ledger, ['getToday'], {
+      accountCode: CODEX_ACCOUNT_CODE,
+      date: '2026-07-28',
+    });
+    assert.equal(today.decisionCount, 4);
+    assert.equal(today.suggestedDecisionLimit, 3);
+    assert.equal(today.limitEnforced, false);
+
+    const hold = await call(fixture.ledger, ['recordDecision', 'createDecision'], {
+      submittedAt: '2026-07-28T15:10:00+08:00',
+      action: 'hold',
+      reason: '只观察默认不计数',
+      countsDaily: true,
+    });
+    assert.equal(hold.counts_daily, 0);
+    assert.equal(hold.daily_sequence, null);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('fund operation actions count by default', async () => {
+  const fixture = await createLedgerFixture('operation-count');
+
+  try {
+    for (const [index, action] of ['buy', 'sell', 'switch', 'cancel_order'].entries()) {
+      const decision = await call(fixture.ledger, ['recordDecision', 'createDecision'], {
+        submittedAt: `2026-07-28T1${index}:00:00+08:00`,
+        action,
+        reason: `${action} 默认计入基金操作次数`,
+      });
+      assert.equal(decision.counts_daily, 1);
+      assert.equal(decision.daily_sequence, index + 1);
+    }
   } finally {
     await fixture.cleanup();
   }

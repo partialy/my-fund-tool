@@ -14,8 +14,9 @@
 - 当前 Codex 账户代码和名称均为 `account-codex`。
 - 账本归属类 API 必须显式传 `accountCode` 或 `accountId`；缺少账户参数必须报错。
 - 页面入口可不带账户参数打开，首屏默认展示 `account-codex`，后续导航、分页和明细请求会继续带当前账户。
-- 每个自然日最多 3 次计数决策；买入、卖出、转换、撤回订单、不操作都计数。
-- 净值更新、订单确认、卖出到账、资产快照、纯数据整理默认不计入每日 3 次。
+- 数据查询、行情搜索、资料复核、页面/API 读取都可以多次执行，不计入操作次数。
+- 只有真实基金操作计入“基金操作次数”：`buy`、`sell`、`switch`、`cancel_order`。`hold`、净值更新、订单确认、卖出到账、资产快照、纯数据整理和现金调整默认不计数。
+- 每日 3 次是建议的基金操作节奏，用于提醒不要过度交易；工具不做硬性次数限制，超过 3 次仍允许记录和执行。
 - 15:00 或以前提交的买入、卖出、转换，申请交易日为当日，按当日净值确认。
 - 15:00 后提交的买入、卖出、转换，申请交易日顺延到下一交易日，按下一交易日净值确认。
 - 买入 T+1 确认份额。
@@ -26,7 +27,7 @@
 - 外部模型可以自行联网搜索其他基金，选择任意可公开核验的公募基金，不限制在 Codex、DeepSeek、豆包或其他账户已投资基金里；也可以继续空仓或只观察。
 - 公开行情、候选基金、费率、规模、风格、历史净值等信息，外部模型优先自行搜索并在理由中说明来源；只有确实无法访问或需要 Codex 复核时，才通过数据需求清单请求 Codex 代取。
 - 本游戏虽是模拟，但使用真实基金盘数据和真实交易规则记录账本。每次买入、卖出、转换或撤单前，都必须谨慎核对数据日期、来源、15:00 规则、T+1 规则和风控约束；没有明确优势时允许 `hold`。
-- 状态为 `submitted` 的未确认订单可以在确认前撤回，撤回接口为 `POST /api/orders/:orderNo/cancel`；状态为 `confirmed`、`settled` 或 `cancelled` 的订单不能撤回。撤回不会删除原下单决策的每日次数，撤回本身作为交易决策时默认也计数。
+- 状态为 `submitted` 的未确认订单可以在确认前撤回，撤回接口为 `POST /api/orders/:orderNo/cancel`；状态为 `confirmed`、`settled` 或 `cancelled` 的订单不能撤回。撤回不会删除原下单操作次数，撤回本身作为基金操作默认也计数。
 - 默认手续费为 0；如果外部模型明确要求按真实费率，必须说明费率来源，Codex 再判断是否可用。
 - 风控限制：单只基金买入后市值不超过总资产 50%；单次买入金额不超过总资产 30%；账户总收益率低于 -10% 时下一次只能减仓、转换到低风险基金或空仓观察；单基金收益率低于 -8% 时必须说明继续持有、减仓或转换理由。
 
@@ -109,7 +110,7 @@ END_FUND_SIM_JSON
 | --- | --- | --- | --- |
 | `runtime.clock` | Codex 本地时间 | 无 | 当前北京时间、日期、是否 15:00 前后 |
 | `trade.calendar` | Codex 判断/联网核对 | `date`、`lookAheadDays` | 是否交易日、T+1 日期、下一交易日 |
-| `trading.today` | 本地 API | `date` | 今日已计数决策次数、剩余次数 |
+| `trading.today` | 本地 API | `date` | 今日基金操作次数、建议操作次数和是否硬限制 |
 | `account.summary` | 本地 API | 无 | 账户总览，含余额、持仓、快照 |
 | `account.balance` | 本地 API | 无 | 可用现金、冻结现金、总现金、持仓摘要 |
 | `account.cashLedger` | 本地 API | `page`、`pageSize` | 现金流水 |
@@ -128,7 +129,7 @@ END_FUND_SIM_JSON
 | `market.fundEstimates` | 互联网 | `fundCodes`、`quoteType` | 基金盘中估值，仅辅助 |
 | `fund.research` | 互联网 | `fundCodes`、`topics` | 基金费率、跟踪指数、风格、规模等 |
 | `fund.discovery` | 互联网 | `keywords`、`categories`、`riskStyle`、`limit` | 当外部模型无法自行搜索时，请 Codex 代找候选基金 |
-| `risk.limits` | 本文档 + 本地账本 | 无 | 每日次数、仓位、回撤、单基金亏损等限制 |
+| `risk.limits` | 本文档 + 本地账本 | 无 | 建议操作节奏、仓位、回撤、单基金亏损等约束 |
 
 推荐的日内决策请求：
 
@@ -144,11 +145,11 @@ BEGIN_FUND_SIM_JSON
   "dataItems": [
     { "key": "runtime.clock", "required": true, "params": {}, "reason": "判断 15:00 规则" },
     { "key": "trade.calendar", "required": true, "params": { "lookAheadDays": 5 }, "reason": "确认 T+1" },
-    { "key": "trading.today", "required": true, "params": { "date": "2026-07-31" }, "reason": "检查今日剩余决策次数" },
+    { "key": "trading.today", "required": true, "params": { "date": "2026-07-31" }, "reason": "查看今日基金操作次数和建议节奏" },
     { "key": "account.balance", "required": true, "params": {}, "reason": "确认现金和总资产" },
     { "key": "portfolio.positions", "required": true, "params": { "page": 1, "pageSize": 100 }, "reason": "确认当前持仓" },
     { "key": "orders.open", "required": true, "params": {}, "reason": "先处理待确认和待到账订单" },
-    { "key": "decisions.today", "required": true, "params": { "date": "2026-07-31" }, "reason": "避免超过每日 3 次" },
+    { "key": "decisions.today", "required": true, "params": { "date": "2026-07-31" }, "reason": "复核今日操作记录，避免无意义频繁交易" },
     { "key": "pnl.summary", "required": true, "params": {}, "reason": "检查收益率和风控" },
     { "key": "fund.nav.latest", "required": true, "params": { "fundCodes": ["007466", "006087"] }, "reason": "核对持仓最新披露净值" },
     { "key": "market.indexQuotes", "required": false, "params": { "symbols": ["000001", "399001", "399006", "000300", "000905"], "quoteType": "intraday" }, "reason": "辅助判断市场环境" },
@@ -206,8 +207,9 @@ Codex 必须按下面格式返回数据，用户原样转给外部模型。
     }
   ],
   "derived": {
-    "decisionCountToday": 0,
-    "remainingDecisionsToday": 3,
+    "fundOperationCountToday": 0,
+    "suggestedFundOperationsPerDay": 3,
+    "limitEnforced": false,
     "positionRatio": null,
     "riskFlags": []
   },
@@ -215,6 +217,7 @@ Codex 必须按下面格式返回数据，用户原样转给外部模型。
   "missing": [],
   "instructionsForDecision": [
     "如果要交易，请返回 fund-sim.operation-command.v1。",
+    "数据可以多次查询，不计入基金操作次数。",
     "不需要计算份额、交易日、确认日和到账日，Codex 会代算。"
   ]
 }
@@ -256,7 +259,7 @@ END_FUND_SIM_JSON
   "decidedAt": "2026-07-31 14:35:00 +08:00",
   "decision": {
     "action": "hold",
-    "countsDaily": true,
+    "countsDaily": false,
     "reason": "市场波动较大，当前仓位和风险收益比不支持加仓。",
     "confidence": "medium",
     "nextSuggestedAt": "2026-07-31 21:00:00 +08:00"
@@ -286,7 +289,7 @@ END_FUND_SIM_JSON
 | `accountCode` | 是 | 必须显式填写，默认 `account-codex` |
 | `decidedAt` | 是 | 外部模型给出决策的北京时间 |
 | `decision.action` | 是 | `hold`、`buy`、`sell`、`switch`、`cancel_order`、`update_only`、`cash_adjustment` |
-| `decision.countsDaily` | 是 | 买入/卖出/转换/撤回订单/不操作通常为 `true`，纯净值/确认/到账为 `false` |
+| `decision.countsDaily` | 是 | 只有 `buy`、`sell`、`switch`、`cancel_order` 这类基金操作计数；`hold` 和纯数据/账务整理默认不计数，即使传 `true` 也不应作为基金操作次数 |
 | `decision.reason` | 是 | 决策理由 |
 | `decision.confidence` | 否 | `low`、`medium`、`high` |
 | `decision.nextSuggestedAt` | 否 | 建议下一次执行时间 |
@@ -354,7 +357,7 @@ END_FUND_SIM_JSON
 }
 ```
 
-撤回只适用于 `submitted` 状态订单。买入撤回后会退回已扣减现金；卖出撤回只改变订单状态。撤回不会抹掉原下单决策次数；如本次撤回属于新的交易决策，应让 `decision.countsDaily=true`。
+撤回只适用于 `submitted` 状态订单。买入撤回后会退回已扣减现金；卖出撤回只改变订单状态。撤回不会抹掉原下单操作次数；如本次撤回属于新的基金操作，应让 `decision.countsDaily=true`。
 
 现金调整：
 
@@ -391,12 +394,12 @@ END_FUND_SIM_JSON
 Codex 收到 `operation-command` 后必须执行以下步骤：
 
 1. 校验 JSON schema、`accountCode`、`commandId`、`basedOnRequestId`。
-2. 重新读取当前时间、账户余额、持仓、待处理订单、今日决策次数。
+2. 重新读取当前时间、账户余额、持仓、待处理订单、今日基金操作次数。
 3. 如果 `skipIfDataStaleAfterMinutes` 已触发，重新拉取必要数据或停止执行。
 4. 先处理账务事项：官方净值写入、订单确认、卖出到账、资产快照。
-5. 如命令要求撤回未确认订单，先核对订单账户、`submitted` 状态和今日剩余次数；如果撤回本身计入决策，先写入 `/api/decisions` 记录 `cancel_order`，再调用 `/api/orders/:orderNo/cancel`。
-6. 再处理外部模型的其他计数决策。
-7. 校验现金、份额、每日 3 次、单基金 50%、单次 30%、亏损风控。
+5. 如命令要求撤回未确认订单，先核对订单账户和 `submitted` 状态；如果撤回本身属于基金操作，先写入 `/api/decisions` 记录 `cancel_order`，再调用 `/api/orders/:orderNo/cancel`。
+6. 再处理外部模型的其他基金操作或观察决策。
+7. 校验现金、份额、建议操作节奏、单基金 50%、单次 30%、亏损风控；每日 3 次只是建议，不作为写入拦截条件。
 8. 按 15:00 规则计算申请交易日。
 9. 写入 `/api/decisions`。
 10. 如需交易，写入 `/api/orders`；买入使用金额，卖出使用份额。
@@ -419,17 +422,18 @@ Codex 执行后返回：
   "executedAt": "2026-07-31 14:36:10 +08:00",
   "status": "executed",
   "countedDecision": {
-    "countsDaily": true,
+    "countsDaily": false,
     "decisionNo": "20260731-002",
-    "decisionCountToday": 2,
-    "remainingDecisionsToday": 1
+    "fundOperationCountToday": 2,
+    "suggestedFundOperationsPerDay": 3,
+    "limitEnforced": false
   },
   "writes": [
     {
       "endpoint": "POST /api/decisions",
       "status": "ok",
       "id": 12,
-      "summary": "记录不操作决策"
+      "summary": "记录观察决策"
     }
   ],
   "calculations": {
@@ -463,7 +467,7 @@ Codex 执行后返回：
 
 - 不要声称已经调用接口；外部模型没有接口权限。
 - 不要伪造本地账本字段、订单编号、确认份额、到账金额。
-- 不要自行假设今日剩余决策次数，必须从数据响应读取。
+- 不要自行假设今日基金操作次数，必须从数据响应读取；3 次只是建议节奏，不是硬上限。
 - 不要要求超过可用现金、可卖份额或风控上限的交易。
 - 可以自行联网搜索候选基金并独立判断，不必跟随其他模型已买基金，也不必为了交易而交易。
 - 如自行搜索公开数据不足，再在数据需求清单中请求 `fund.discovery`、`fund.research` 或 `fund.nav.history`，由 Codex 代取或复核。

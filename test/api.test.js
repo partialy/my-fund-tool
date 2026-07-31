@@ -698,7 +698,7 @@ test('operations page defaults the timeline to ten rows and exposes pagination l
   }
 });
 
-test('decision endpoint rejects the fourth counted decision on one date', async () => {
+test('decision endpoint records more than three fund operations on one date', async () => {
   const fixture = await createAppFixture('decision-limit');
 
   try {
@@ -709,57 +709,64 @@ test('decision endpoint rejects the fourth counted decision on one date', async 
           accountCode: CODEX_ACCOUNT_CODE,
           decisionNo: `20260728-00${index + 1}`,
           submittedAt: `2026-07-28T${time}+08:00`,
-          action: 'hold',
-          reason: `第 ${index + 1} 次不操作`,
+          action: 'buy',
+          reason: `第 ${index + 1} 次基金操作`,
           countsDaily: true,
         })
         .expect((res) => assert.ok([200, 201].includes(res.status), res.text));
       unwrapBody(response);
     }
 
-    const rejected = await request(fixture.app).post('/api/decisions').send({
-      accountCode: CODEX_ACCOUNT_CODE,
-      decisionNo: '20260728-004',
-      submittedAt: '2026-07-28T14:59:59+08:00',
-      action: 'hold',
-      reason: '超过每日次数限制的不操作',
-      countsDaily: true,
-    });
-
-    assert.ok([400, 409, 429].includes(rejected.status), rejected.text);
-    assert.equal(rejected.body.ok, false);
-    assert.match(
-      String(rejected.body.error?.message ?? rejected.body.error ?? ''),
-      /daily|limit|decision|次数|上限|最多|3/i,
+    const fourth = unwrapBody(
+      await request(fixture.app)
+        .post('/api/decisions')
+        .send({
+          accountCode: CODEX_ACCOUNT_CODE,
+          decisionNo: '20260728-004',
+          submittedAt: '2026-07-28T14:59:59+08:00',
+          action: 'buy',
+          reason: '第四次基金操作仍允许记录',
+          countsDaily: true,
+        })
+        .expect(200),
     );
+    assert.equal(fourth.counts_daily, 1);
+    assert.equal(fourth.daily_sequence, 4);
   } finally {
     await fixture.cleanup();
   }
 });
 
-test('cancel_order decisions count toward the daily limit by default', async () => {
+test('hold does not count by default while fund operations keep counting without a hard limit', async () => {
   const fixture = await createAppFixture('cancel-order-counts');
 
   try {
-    await request(fixture.app)
-      .post('/api/decisions')
-      .send({
-        accountCode: CODEX_ACCOUNT_CODE,
-        submittedAt: '2026-07-28T09:30:00+08:00',
-        action: 'hold',
-        reason: '第一次观察',
-      })
-      .expect(200);
+    const hold = unwrapBody(
+      await request(fixture.app)
+        .post('/api/decisions')
+        .send({
+          accountCode: CODEX_ACCOUNT_CODE,
+          submittedAt: '2026-07-28T09:30:00+08:00',
+          action: 'hold',
+          reason: '只是观察，不做基金操作',
+          countsDaily: true,
+        })
+        .expect(200),
+    );
+    assert.equal(hold.counts_daily, 0);
+    assert.equal(hold.daily_sequence, null);
 
-    await request(fixture.app)
-      .post('/api/decisions')
-      .send({
-        accountCode: CODEX_ACCOUNT_CODE,
-        submittedAt: '2026-07-28T12:00:00+08:00',
-        action: 'hold',
-        reason: '第二次观察',
-      })
-      .expect(200);
+    for (const [index, time] of ['10:00:00', '11:00:00', '13:00:00'].entries()) {
+      await request(fixture.app)
+        .post('/api/decisions')
+        .send({
+          accountCode: CODEX_ACCOUNT_CODE,
+          submittedAt: `2026-07-28T${time}+08:00`,
+          action: 'buy',
+          reason: `第 ${index + 1} 次基金操作`,
+        })
+        .expect(200);
+    }
 
     const cancelDecision = unwrapBody(
       await request(fixture.app)
@@ -773,18 +780,7 @@ test('cancel_order decisions count toward the daily limit by default', async () 
         .expect(200),
     );
     assert.equal(cancelDecision.counts_daily, 1);
-    assert.equal(cancelDecision.daily_sequence, 3);
-
-    const rejected = await request(fixture.app)
-      .post('/api/decisions')
-      .send({
-        accountCode: CODEX_ACCOUNT_CODE,
-        submittedAt: '2026-07-28T14:50:00+08:00',
-        action: 'hold',
-        reason: '第四次观察',
-      });
-
-    assert.ok([400, 409, 429].includes(rejected.status), rejected.text);
+    assert.equal(cancelDecision.daily_sequence, 4);
   } finally {
     await fixture.cleanup();
   }

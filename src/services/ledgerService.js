@@ -25,7 +25,7 @@ export const DEFAULT_ACCOUNT_CODE = 'account-codex';
 const LEGACY_DEFAULT_ACCOUNT_CODE = 'default';
 const DEFAULT_ACCOUNT_NAME = 'account-codex';
 const DEFAULT_INITIAL_CASH_CENTS = 1000000;
-const COUNTING_ACTIONS = new Set(['buy', 'sell', 'switch', 'hold', 'cancel_order']);
+const COUNTING_ACTIONS = new Set(['buy', 'sell', 'switch', 'cancel_order']);
 
 function plain(row) {
   return row ? { ...row } : null;
@@ -882,7 +882,9 @@ export function createLedgerService(db) {
       }
 
       const countsDaily = input.countsDaily ?? input.counts_daily;
-      const shouldCount = countsDaily === undefined ? COUNTING_ACTIONS.has(action) : Number(Boolean(countsDaily));
+      const shouldCount = COUNTING_ACTIONS.has(action)
+        ? countsDaily === undefined || Number(Boolean(countsDaily))
+        : 0;
       let dailySequence = null;
 
       if (shouldCount) {
@@ -895,9 +897,6 @@ export function createLedgerService(db) {
           { accountId: account.id, decisionDate }
         );
         const currentCount = Number(countRow.count);
-        if (currentCount >= account.daily_decision_limit) {
-          throw new Error(`Daily decision limit exceeded for ${decisionDate}.`);
-        }
         dailySequence = currentCount + 1;
       }
 
@@ -1563,7 +1562,9 @@ export function createLedgerService(db) {
       applicationTradeDate: applicationTradeDate(submittedAt),
       nextTradeDate: nextTradeDate(today),
       decisionCount: Number(decisionCount.count),
-      decisionLimit: account.daily_decision_limit
+      decisionLimit: account.daily_decision_limit,
+      suggestedDecisionLimit: account.daily_decision_limit,
+      limitEnforced: false
     };
   }
 
@@ -1918,7 +1919,9 @@ export function createLedgerService(db) {
       ...accountModel,
       ...accountModel.balance,
       decisionCount: today.decisionCount,
-      decisionLimit: today.decisionLimit
+      decisionLimit: today.decisionLimit,
+      suggestedDecisionLimit: today.suggestedDecisionLimit,
+      limitEnforced: today.limitEnforced
     };
 
     return {
