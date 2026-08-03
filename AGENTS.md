@@ -13,6 +13,7 @@
 - 后端：Express。
 - 页面：EJS 服务端渲染。
 - 数据解析：Cheerio。
+- AI 调用：OpenAI SDK 兼容 DeepSeek API，使用 `DEEPSEEK_API_KEY`。
 - 测试：node:test + Supertest。
 
 ## 账本口径
@@ -42,6 +43,8 @@
 ## 外部模型交接流程
 
 - 外部模型无法直接访问本地接口时，统一使用 `docs/external-model-handoff.md`。
+- 面向外部模型的轻量交接文件放在 `E:\资料\money\games\fund-sim-memories`：`game-rules.md` 保存共享玩法和 JSON 协议，每个 `account-*.md` 只保存对应账户记忆。
+- 给外部模型时优先只发送 `game-rules.md` 和对应账户记忆文件，不要混发其它账户记忆，避免不同账户的持仓、订单和风格互相干扰。
 - 外部模型先返回 `fund-sim.data-request.v1` 数据需求清单；Codex 按清单取本地 API、联网补行情，并返回 `fund-sim.data-response.v1`。
 - 外部模型再返回 `fund-sim.operation-command.v1` 决策命令；Codex 负责校验账户、决策次数、现金、份额、风控、15:00 交易日规则、T+1 确认/到账，随后调用接口写入并返回 `fund-sim.execution-report.v1`。
 - 外部模型只表达交易意图，不要伪造接口结果、订单编号、确认份额、到账金额或盈亏计算。
@@ -52,6 +55,16 @@
 
 - 收益、上涨、盈利等正向数值使用红色；亏损、下跌等负向数值使用绿色，保持真实基金/股票软件常见风格。
 - 当前持仓必须显示浮动盈亏收益率，收益率由 `(市值 - 成本) / 成本` 计算。
+
+## 管理后台与 AI 分析
+
+- `/admin` 是无需登录的全账户后台入口，不携带单账户 `accountCode`，也不显示账户下拉筛选。
+- 后台展示所有账户的资产、累计收益、收益率、现金占比、持仓市值、持仓数、操作次数、最大回撤、日盈亏波动、集中度，以及已有持仓基金关注榜。
+- `src/services/adminAnalysisService.js` 负责后台聚合、风险指标、基金关注榜、DeepSeek 提示词和 AI 分析记录保存；路由层不能直接写聚合 SQL 或 AI 调用逻辑。
+- `POST /api/admin/ai-analysis` 手动生成并保存 AI 分析；`GET /api/admin/ai-analysis/latest` 读取最近一次分析。
+- AI 分析只读账本数据，不创建决策、订单、现金流水或行情数据；推荐范围优先限于本地已有基金和行情。
+- DeepSeek 使用 `deepseek-v4-pro`、`thinking: { type: 'enabled' }`、`reasoning_effort: 'high'`；未配置 `DEEPSEEK_API_KEY` 时后台数据可看，但生成分析应明确报错。
+- `ai_analysis_runs` 保存 AI 分析运行记录，包括状态、输入快照 JSON、提示词、模型名、响应正文、错误信息和时间。
 
 ## 部署口径
 

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { openDatabase } from './db/connection.js';
 import { initializeDatabase } from './db/init.js';
 import { createLedgerService } from './services/ledgerService.js';
+import { createAdminAnalysisService } from './services/adminAnalysisService.js';
 import { createApiRouter, sendErrorResponse } from './routes/api.js';
 import { createPagesRouter } from './routes/pages.js';
 
@@ -13,6 +14,9 @@ export function createApp({
   dbPath,
   db,
   ledger,
+  adminAnalysis,
+  deepSeekClient,
+  env,
   initialize = true,
   importLegacyData,
 } = {}) {
@@ -27,9 +31,14 @@ export function createApp({
   if (typeof ledgerService.setupDefaultAccount === 'function') {
     ledgerService.setupDefaultAccount();
   }
+  const adminAnalysisService = adminAnalysis ?? createAdminAnalysisService(database, {
+    deepSeekClient,
+    env,
+  });
 
   app.locals.db = database;
   app.locals.ledger = ledgerService;
+  app.locals.adminAnalysis = adminAnalysisService;
 
   app.set('views', path.join(__dirname, 'views'));
   app.set('view engine', 'ejs');
@@ -41,9 +50,13 @@ export function createApp({
   app.use('/api', createApiRouter({
     db: database,
     ledger: ledgerService,
+    adminAnalysis: adminAnalysisService,
     importLegacyData,
   }));
-  app.use('/', createPagesRouter({ ledger: ledgerService }));
+  app.use('/', createPagesRouter({
+    ledger: ledgerService,
+    adminAnalysis: adminAnalysisService,
+  }));
 
   app.use((error, request, response, next) => {
     if (request.path.startsWith('/api')) {

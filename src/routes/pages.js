@@ -7,9 +7,10 @@ const PAGE_METHODS = {
   operations: ['getOperationsViewModel', 'getOperations', 'listOperations', 'listOrders'],
   pnl: ['getPnlViewModel', 'getPnl', 'listPnl', 'listPnlEntries', 'getProfitAndLoss'],
   action: ['getActionViewModel', 'getAction', 'getActionDetail', 'getDecisionDetail'],
+  admin: ['getAdminViewModel'],
 };
 
-export function createPagesRouter({ ledger } = {}) {
+export function createPagesRouter({ ledger, adminAnalysis } = {}) {
   const router = express.Router();
 
   router.get('/', pageHandler({
@@ -42,6 +43,15 @@ export function createPagesRouter({ ledger } = {}) {
     title: '盈亏',
     active: 'pnl',
     methods: PAGE_METHODS.pnl,
+  }));
+
+  router.get('/admin', pageHandler({
+    ledger: adminAnalysis,
+    view: 'admin',
+    title: '管理后台',
+    active: 'admin',
+    methods: PAGE_METHODS.admin,
+    useDefaultAccount: false,
   }));
 
   router.get('/actions/:id', pageHandler({
@@ -80,16 +90,26 @@ export function createPagesRouter({ ledger } = {}) {
   return router;
 }
 
-function pageHandler({ ledger, view, title, active, methods, getPayload = defaultPayload }) {
+function pageHandler({
+  ledger,
+  view,
+  title,
+  active,
+  methods,
+  getPayload = defaultPayload,
+  useDefaultAccount = true,
+}) {
   return async (request, response, next) => {
     try {
-      const payload = withDefaultPageAccount(getPayload(request));
+      const payload = useDefaultAccount
+        ? withDefaultPageAccount(getPayload(request))
+        : getPayload(request);
       const data = await loadPageData(ledger, methods, payload);
       const model = {
         title,
         active,
         data,
-        query: withDefaultPageAccount(request.query),
+        query: useDefaultAccount ? withDefaultPageAccount(request.query) : request.query,
         params: request.params
       };
       renderPage(response, view, model, next);

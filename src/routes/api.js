@@ -36,7 +36,7 @@ const LEDGER_METHODS = {
   ],
 };
 
-export function createApiRouter({ ledger, db, importLegacyData } = {}) {
+export function createApiRouter({ ledger, db, adminAnalysis, importLegacyData } = {}) {
   if (!ledger) {
     throw new Error('createApiRouter requires a ledger service.');
   }
@@ -178,6 +178,16 @@ export function createApiRouter({ ledger, db, importLegacyData } = {}) {
     sendSuccessResponse(response, data);
   }));
 
+  router.post('/admin/ai-analysis', asyncHandler(async (_request, response) => {
+    const data = await requireAdminAnalysis(adminAnalysis).runAiAnalysis();
+    sendSuccessResponse(response, data);
+  }));
+
+  router.get('/admin/ai-analysis/latest', asyncHandler(async (_request, response) => {
+    const data = await requireAdminAnalysis(adminAnalysis).getLatestAiAnalysis();
+    sendSuccessResponse(response, data);
+  }));
+
   router.post('/import/legacy', asyncHandler(async (request, response) => {
     const importer = await resolveLegacyImporter(importLegacyData);
     const payload = {
@@ -203,6 +213,18 @@ export function createApiRouter({ ledger, db, importLegacyData } = {}) {
   });
 
   return router;
+}
+
+function requireAdminAnalysis(adminAnalysis) {
+  if (!adminAnalysis) {
+    throw {
+      status: 500,
+      code: 'ADMIN_ANALYSIS_NOT_CONFIGURED',
+      message: 'Admin analysis service is not configured.',
+    };
+  }
+
+  return adminAnalysis;
 }
 
 export function sendSuccessResponse(response, data, status = 200) {

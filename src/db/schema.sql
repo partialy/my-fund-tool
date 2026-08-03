@@ -229,3 +229,18 @@ CREATE TABLE IF NOT EXISTS source_refs (
 
 CREATE INDEX IF NOT EXISTS idx_source_refs_entity
   ON source_refs(entity_type, entity_id);
+
+CREATE TABLE IF NOT EXISTS ai_analysis_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed')),
+  model TEXT NOT NULL,
+  input_snapshot_json TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  content TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_runs_created
+  ON ai_analysis_runs(created_at DESC, id DESC);

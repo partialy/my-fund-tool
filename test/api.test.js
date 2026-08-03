@@ -8,14 +8,14 @@ import request from 'supertest';
 
 const CODEX_ACCOUNT_CODE = 'account-codex';
 
-async function createAppFixture(name) {
+async function createAppFixture(name, options = {}) {
   const root = path.join(os.tmpdir(), `fund-sim-tool-api-${name}-${Date.now()}`);
   await mkdir(root, { recursive: true });
 
   const { createApp } = await import('../src/app.js');
   const dbPath = path.join(root, 'api.sqlite');
 
-  const app = createApp({ dbPath });
+  const app = createApp({ dbPath, ...options });
   app.locals.ledger?.setupDefaultAccount?.({
     initialCash: '0.00',
     occurredAt: '2026-07-23T09:00:00+08:00',
@@ -991,6 +991,114 @@ test('account page exposes position history detail controls', async () => {
     assert.equal($('[data-position-history-modal]').length, 1);
     assert.match(response.text, /\/api\/positions\/.*\/history/);
     assert.match(response.text, /payload\?\.data\?\.items/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('admin page shows all-account analysis panels and latest AI analysis area', async () => {
+  const fixture = await createAppFixture('admin-page');
+
+  try {
+    const { ledger } = fixture.app.locals;
+    ledger.createAccount({
+      accountCode: 'alt',
+      name: '备用账户',
+      initialCash: '5000.00',
+      occurredAt: '2026-01-01T09:00:00+08:00',
+    });
+
+    const response = await request(fixture.app).get('/admin').expect(200);
+    const $ = cheerio.load(response.text);
+
+    assert.match($('h1').text(), /管理后台/);
+    assert.match(response.text, /AI分析/);
+    assert.match(response.text, /account-codex/);
+    assert.match(response.text, /备用账户/);
+    assert.equal($('[data-admin-ai-button]').length, 1);
+    assert.equal($('[data-admin-ai-result]').length, 1);
+    assert.ok($('a[href="/admin"]').length > 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('admin AI analysis endpoint requires a DeepSeek API key or injected client', async () => {
+  const fixture = await createAppFixture('admin-ai-no-key', {
+    env: { DEEPSEEK_API_KEY: '' },
+  });
+
+  try {
+    const response = await request(fixture.app)
+      .post('/api/admin/ai-analysis')
+      .expect(500);
+
+    assert.equal(response.body.ok, false);
+    assert.match(response.body.error.message, /DEEPSEEK_API_KEY/);
+
+    const latest = await request(fixture.app)
+      .get('/api/admin/ai-analysis/latest')
+      .expect(200);
+    assert.equal(latest.body.ok, true);
+    assert.equal(latest.body.data, null);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('admin AI analysis endpoint saves mock DeepSeek response and exposes latest run', async () => {
+  const calls = [];
+  const fixture = await createAppFixture('admin-ai-mock', {
+    deepSeekClient: {
+      chat: {
+        completions: {
+          create: async (payload) => {
+            calls.push(payload);
+            return {
+              choices: [
+                { message: { content: 'AI分析：备用账户收益更激进，A001 推荐多关注。' } },
+              ],
+            };
+          },
+        },
+      },
+    },
+  });
+
+  try {
+    const { ledger } = fixture.app.locals;
+    ledger.createAccount({
+      accountCode: 'alt',
+      name: '备用账户',
+      initialCash: '10000.00',
+      occurredAt: '2026-01-01T09:00:00+08:00',
+    });
+    seedConfirmedPosition(ledger, {
+      accountCode: 'alt',
+      code: 'A001',
+      fundName: '测试基金A',
+      amount: '1000.00',
+      orderNo: 'alt-20260101-001',
+      latestDate: '2026-01-04',
+      latestNav: '1.1000',
+    });
+
+    const generated = unwrapBody(
+      await request(fixture.app)
+        .post('/api/admin/ai-analysis')
+        .expect(200),
+    );
+    const latest = unwrapBody(
+      await request(fixture.app)
+        .get('/api/admin/ai-analysis/latest')
+        .expect(200),
+    );
+
+    assert.equal(generated.status, 'success');
+    assert.match(generated.content, /A001 推荐多关注/);
+    assert.equal(latest.id, generated.id);
+    assert.equal(calls[0].model, 'deepseek-v4-pro');
+    assert.match(calls[0].messages[1].content, /备用账户/);
   } finally {
     await fixture.cleanup();
   }

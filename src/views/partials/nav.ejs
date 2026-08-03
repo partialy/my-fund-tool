@@ -4,6 +4,7 @@ const appLabel = typeof appName !== 'undefined' && appName ? appName : '基金�
 const vm = typeof data !== 'undefined' && data ? data : {};
 const queryParams = typeof query !== 'undefined' && query ? query : {};
 const accounts = Array.isArray(vm.accounts) ? vm.accounts : [];
+const showAccountSwitcher = safeActive !== 'admin' && accounts.length;
 const currentAccountCode = String(
   vm.currentAccount?.accountCode
     ?? vm.accountCode
@@ -12,6 +13,9 @@ const currentAccountCode = String(
     ?? ''
 );
 const withAccount = (href) => {
+  if (href === '/admin') {
+    return href;
+  }
   const url = new URL(href, 'http://fund-sim.local');
   if (currentAccountCode) {
     url.searchParams.set('accountCode', currentAccountCode);
@@ -22,7 +26,8 @@ const navItems = [
   { key: 'dashboard', href: '/', label: '总览' },
   { key: 'account', href: '/account', label: '账户' },
   { key: 'operations', href: '/operations', label: '操作' },
-  { key: 'pnl', href: '/pnl', label: '盈亏' }
+  { key: 'pnl', href: '/pnl', label: '盈亏' },
+  { key: 'admin', href: '/admin', label: '后台' }
 ];
 %>
 <header class="topbar">
@@ -34,7 +39,7 @@ const navItems = [
     </span>
   </a>
   <div class="topbar-actions">
-    <% if (accounts.length) { %>
+    <% if (showAccountSwitcher) { %>
       <label class="account-switcher">
         <span>账户</span>
         <select name="accountCode" data-account-switcher>

@@ -1,0 +1,255 @@
+<%
+const vm = typeof data !== 'undefined' && data ? data : {};
+const accounts = Array.isArray(vm.accounts) ? vm.accounts : [];
+const funds = Array.isArray(vm.funds) ? vm.funds : [];
+const latestAnalysis = vm.latestAnalysis || null;
+const summary = vm.summary || {};
+const pick = (obj, ...keys) => {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+  }
+  return undefined;
+};
+const fmtNum = (value, digits = 2) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : String(value);
+};
+const money = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? `¥${fmtNum(n, 2)}` : String(value);
+};
+const pct = (value) => {
+  if (value === undefined || value === null || value === '') return '--';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return `${fmtNum(Math.abs(n) <= 1 ? n * 100 : n, 2)}%`;
+};
+const tone = (value) => {
+  const n = Number(value);
+  return !Number.isFinite(n) || n === 0 ? 'muted' : n > 0 ? 'positive' : 'negative';
+};
+const analysisText = latestAnalysis?.content || (latestAnalysis?.status === 'failed' ? latestAnalysis.errorMessage : '暂无 AI 分析。点击生成后会保存并显示最近一次结果。');
+%>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理后台</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('partials/nav', { active: 'admin' }) %>
+    <main class="page-grid">
+      <section class="page-heading admin-heading">
+        <div>
+          <p class="eyebrow">全账户视角</p>
+          <h1>管理后台</h1>
+          <p>集中查看所有账户的收益、持仓、风险控制和基金关注度。</p>
+        </div>
+        <button
+          type="button"
+          class="soft-button admin-ai-button"
+          data-admin-ai-button
+          <%= vm.aiEnabled ? '' : 'disabled' %>
+        >生成 AI 分析</button>
+      </section>
+
+      <section class="metrics-grid compact" aria-label="后台关键指标">
+        <article class="metric-card">
+          <span>账户数</span>
+          <strong class="num"><%= pick(summary, 'accountCount') ?? accounts.length %></strong>
+          <small>无需登录，全账户查看</small>
+        </article>
+        <article class="metric-card">
+          <span>总资产</span>
+          <strong class="num"><%= money(pick(summary, 'totalAssets')) %></strong>
+          <small>全部账户合计</small>
+        </article>
+        <article class="metric-card">
+          <span>累计收益</span>
+          <strong class="num <%= tone(pick(summary, 'totalPnl')) %>"><%= money(pick(summary, 'totalPnl')) %></strong>
+          <small><%= pick(summary, 'fundCount') ?? funds.length %> 只当前持仓基金</small>
+        </article>
+      </section>
+
+      <section class="glass-panel admin-ai-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">AI分析</p>
+            <h2>DeepSeek 复盘</h2>
+          </div>
+          <span class="subtle" data-admin-ai-status>
+            <% if (!vm.aiEnabled) { %>
+              未配置 DEEPSEEK_API_KEY
+            <% } else if (latestAnalysis?.createdAt) { %>
+              最近分析 <%= latestAnalysis.createdAt %>
+            <% } else { %>
+              可手动生成
+            <% } %>
+          </span>
+        </div>
+        <pre class="analysis-output" data-admin-ai-result><%= analysisText %></pre>
+        <p class="subtle admin-disclaimer">AI 分析仅用于游戏复盘和观察，不作为真实投资建议。</p>
+      </section>
+
+      <section class="glass-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">账户排行</p>
+            <h2>收益与资金结构</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>账户</th>
+                <th class="num">总资产</th>
+                <th class="num">累计收益</th>
+                <th class="num">收益率</th>
+                <th class="num">现金占比</th>
+                <th class="num">持仓市值</th>
+                <th class="num">持仓数</th>
+                <th class="num">操作次数</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (accounts.length) { %>
+                <% accounts.forEach((account) => { %>
+                  <tr>
+                    <td><strong><%= account.accountName || account.accountCode %></strong><br><span class="subtle"><%= account.accountCode %></span></td>
+                    <td class="num"><%= money(account.totalAssets) %></td>
+                    <td class="num <%= tone(account.accumulatedPnl) %>"><%= money(account.accumulatedPnl) %></td>
+                    <td class="num <%= tone(account.returnRate) %>"><%= pct(account.returnRate) %></td>
+                    <td class="num"><%= pct(account.cashRatio) %></td>
+                    <td class="num"><%= money(account.positionsMarketValue) %></td>
+                    <td class="num"><%= account.positionCount %></td>
+                    <td class="num"><%= account.operationCount %></td>
+                  </tr>
+                <% }) %>
+              <% } else { %>
+                <tr><td class="empty-row" colspan="8">暂无账户数据。</td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="split-grid">
+        <article class="glass-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">风险控制</p>
+              <h2>风险对比</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>账户</th>
+                  <th class="num">最大回撤</th>
+                  <th class="num">日盈亏波动</th>
+                  <th class="num">集中度</th>
+                  <th>最新快照</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (accounts.length) { %>
+                  <% accounts.forEach((account) => { %>
+                    <tr>
+                      <td><strong><%= account.accountName || account.accountCode %></strong></td>
+                      <td class="num negative"><%= pct(account.maxDrawdownRate) %></td>
+                      <td class="num"><%= money(account.pnlVolatility) %></td>
+                      <td class="num"><%= pct(account.concentrationRate) %></td>
+                      <td><%= account.latestSnapshotDate || '--' %></td>
+                    </tr>
+                  <% }) %>
+                <% } else { %>
+                  <tr><td class="empty-row" colspan="5">暂无风险数据。</td></tr>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="glass-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">基金关注榜</p>
+              <h2>已有基金关注度</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>基金</th>
+                  <th class="num">账户覆盖</th>
+                  <th class="num">总市值</th>
+                  <th class="num">平均收益率</th>
+                  <th>最新净值日</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (funds.length) { %>
+                  <% funds.forEach((fund) => { %>
+                    <tr>
+                      <td><strong><%= fund.fundCode %></strong> <%= fund.fundName || '' %><br><span class="subtle"><%= (fund.accountCodes || []).join('、') %></span></td>
+                      <td class="num"><%= fund.holdingAccountCount %></td>
+                      <td class="num"><%= money(fund.totalMarketValue) %></td>
+                      <td class="num <%= tone(fund.averageReturnRate) %>"><%= pct(fund.averageReturnRate) %></td>
+                      <td><%= fund.latestNavDate || '--' %></td>
+                    </tr>
+                  <% }) %>
+                <% } else { %>
+                  <tr><td class="empty-row" colspan="5">暂无当前持仓基金。</td></tr>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script>
+    (() => {
+      const button = document.querySelector('[data-admin-ai-button]');
+      const result = document.querySelector('[data-admin-ai-result]');
+      const status = document.querySelector('[data-admin-ai-status]');
+      if (!button || !result || !status) return;
+
+      button.addEventListener('click', async () => {
+        const originalText = button.textContent;
+        button.disabled = true;
+        button.textContent = '分析中...';
+        status.textContent = '正在调用 DeepSeek...';
+
+        try {
+          const response = await fetch('/api/admin/ai-analysis', { method: 'POST' });
+          const payload = await response.json();
+          if (!response.ok || payload.ok === false) {
+            throw new Error(payload?.error?.message || `请求失败：${response.status}`);
+          }
+          result.textContent = payload.data?.content || 'AI 未返回分析内容。';
+          status.textContent = payload.data?.createdAt ? `最近分析 ${payload.data.createdAt}` : '分析已生成';
+        } catch (error) {
+          result.textContent = error.message || 'AI 分析生成失败。';
+          status.textContent = '生成失败';
+        } finally {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

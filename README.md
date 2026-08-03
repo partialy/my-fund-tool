@@ -15,6 +15,8 @@ pnpm dev
 
 服务默认监听 `0.0.0.0:53999`，可通过 `HOST` / `PORT` 环境变量覆盖。
 
+DeepSeek AI 分析需要配置 `DEEPSEEK_API_KEY`。未配置时 `/admin` 仍可查看所有账户数据，但不能生成新的 AI 分析。
+
 ## 服务器部署
 
 当前宝塔服务器部署目录：`/www/wwwroot/node-service/fund-sim-tool`
@@ -60,7 +62,15 @@ git config --global https.proxy http://192.168.9.100:10809
 - `POST /api/orders/:orderNo/cancel`
 - `POST /api/orders/:orderNo/settle`
 - `POST /api/valuation/snapshot`
+- `GET /api/admin/ai-analysis/latest`
+- `POST /api/admin/ai-analysis`
 - `POST /api/import/legacy`
+
+## 管理后台
+
+后台入口：`/admin`。后台无需登录，按全账户视角展示账户排行、收益、持仓市值、风险控制、操作次数和已有基金关注榜。
+
+AI 分析为手动触发并保存最近结果：点击“生成 AI 分析”后，服务端会汇总本地账本数据，调用 DeepSeek `deepseek-v4-pro`，并把输入快照、提示词、模型输出或错误保存到 `ai_analysis_runs`。AI 只能基于本地账本已有数据分析，缺失行情或样本不足时应说明数据不足；页面会标注“AI 分析仅用于游戏复盘和观察，不作为真实投资建议”。
 
 ## 外部模型交接
 
