@@ -36,7 +36,7 @@ const LEDGER_METHODS = {
   ],
 };
 
-export function createApiRouter({ ledger, db, adminAnalysis, importLegacyData } = {}) {
+export function createApiRouter({ ledger, db, adminAnalysis, adminSql, importLegacyData } = {}) {
   if (!ledger) {
     throw new Error('createApiRouter requires a ledger service.');
   }
@@ -188,6 +188,11 @@ export function createApiRouter({ ledger, db, adminAnalysis, importLegacyData } 
     sendSuccessResponse(response, data);
   }));
 
+  router.post('/admin/sql', asyncHandler(async (request, response) => {
+    const data = await requireAdminSql(adminSql).executeSql(bodyPayload(request));
+    sendSuccessResponse(response, data);
+  }));
+
   router.post('/import/legacy', asyncHandler(async (request, response) => {
     const importer = await resolveLegacyImporter(importLegacyData);
     const payload = {
@@ -225,6 +230,18 @@ function requireAdminAnalysis(adminAnalysis) {
   }
 
   return adminAnalysis;
+}
+
+function requireAdminSql(adminSql) {
+  if (!adminSql) {
+    throw {
+      status: 500,
+      code: 'ADMIN_SQL_NOT_CONFIGURED',
+      message: 'Admin SQL service is not configured.',
+    };
+  }
+
+  return adminSql;
 }
 
 export function sendSuccessResponse(response, data, status = 200) {

@@ -1103,3 +1103,120 @@ test('admin AI analysis endpoint saves mock DeepSeek response and exposes latest
     await fixture.cleanup();
   }
 });
+
+test('admin SQL endpoint executes update statements', async () => {
+  const fixture = await createAppFixture('admin-sql-update');
+
+  try {
+    const result = unwrapBody(
+      await request(fixture.app)
+        .post('/api/admin/sql')
+        .send({
+          sql: "UPDATE accounts SET name = 'manual-edit' WHERE code = 'account-codex';",
+        })
+        .expect(200),
+    );
+
+    assert.equal(result.executed, true);
+    assert.equal(typeof result.elapsedMs, 'number');
+    assert.ok(result.elapsedMs >= 0);
+
+    const accounts = unwrapBody(await request(fixture.app).get('/api/accounts').expect(200));
+    assert.equal(
+      accounts.find((account) => account.accountCode === CODEX_ACCOUNT_CODE).name,
+      'manual-edit',
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('admin SQL endpoint executes multi-statement and caller-managed transaction SQL', async () => {
+  const fixture = await createAppFixture('admin-sql-multi');
+
+  try {
+    unwrapBody(
+      await request(fixture.app)
+        .post('/api/admin/sql')
+        .send({
+          sql: [
+            "UPDATE accounts SET cash_available_cents = 12345 WHERE code = 'account-codex';",
+            "UPDATE accounts SET cash_frozen_cents = 678 WHERE code = 'account-codex';",
+          ].join('\n'),
+        })
+        .expect(200),
+    );
+
+    let balance = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200),
+    );
+    assert.equal(balance.cashAvailable, 123.45);
+    assert.equal(balance.cashFrozen, 6.78);
+
+    unwrapBody(
+      await request(fixture.app)
+        .post('/api/admin/sql')
+        .send({
+          sql: [
+            'BEGIN IMMEDIATE;',
+            "UPDATE accounts SET cash_available_cents = 22222 WHERE code = 'account-codex';",
+            "UPDATE accounts SET cash_frozen_cents = 0 WHERE code = 'account-codex';",
+            'COMMIT;',
+          ].join('\n'),
+        })
+        .expect(200),
+    );
+
+    balance = unwrapBody(
+      await request(fixture.app)
+        .get('/api/account/balance')
+        .query({ accountCode: CODEX_ACCOUNT_CODE })
+        .expect(200),
+    );
+    assert.equal(balance.cashAvailable, 222.22);
+    assert.equal(balance.cashFrozen, 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('admin SQL endpoint validates sql payload', async () => {
+  const fixture = await createAppFixture('admin-sql-validation');
+
+  try {
+    for (const payload of [{}, { sql: '' }, { sql: '   ' }, { sql: 123 }]) {
+      const response = await request(fixture.app)
+        .post('/api/admin/sql')
+        .send(payload)
+        .expect(400);
+
+      assert.equal(response.body.ok, false);
+      assert.equal(response.body.error.code, 'BAD_REQUEST');
+      assert.match(response.body.error.message, /sql/i);
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('admin SQL endpoint returns SQL_EXECUTION_FAILED for invalid SQL without crashing', async () => {
+  const fixture = await createAppFixture('admin-sql-invalid');
+
+  try {
+    const response = await request(fixture.app)
+      .post('/api/admin/sql')
+      .send({ sql: 'UPDATE accounts SET WHERE;' })
+      .expect(400);
+
+    assert.equal(response.body.ok, false);
+    assert.equal(response.body.error.code, 'SQL_EXECUTION_FAILED');
+    assert.match(response.body.error.message, /syntax|near|SQLITE/i);
+
+    unwrapBody(await request(fixture.app).get('/api/health').expect(200));
+  } finally {
+    await fixture.cleanup();
+  }
+});

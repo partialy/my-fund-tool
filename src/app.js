@@ -5,6 +5,7 @@ import { openDatabase } from './db/connection.js';
 import { initializeDatabase } from './db/init.js';
 import { createLedgerService } from './services/ledgerService.js';
 import { createAdminAnalysisService } from './services/adminAnalysisService.js';
+import { createAdminSqlService } from './services/adminSqlService.js';
 import { createApiRouter, sendErrorResponse } from './routes/api.js';
 import { createPagesRouter } from './routes/pages.js';
 
@@ -15,6 +16,7 @@ export function createApp({
   db,
   ledger,
   adminAnalysis,
+  adminSql,
   deepSeekClient,
   env,
   initialize = true,
@@ -35,10 +37,12 @@ export function createApp({
     deepSeekClient,
     env,
   });
+  const adminSqlService = adminSql ?? createAdminSqlService(database);
 
   app.locals.db = database;
   app.locals.ledger = ledgerService;
   app.locals.adminAnalysis = adminAnalysisService;
+  app.locals.adminSql = adminSqlService;
 
   app.set('views', path.join(__dirname, 'views'));
   app.set('view engine', 'ejs');
@@ -51,6 +55,7 @@ export function createApp({
     db: database,
     ledger: ledgerService,
     adminAnalysis: adminAnalysisService,
+    adminSql: adminSqlService,
     importLegacyData,
   }));
   app.use('/', createPagesRouter({

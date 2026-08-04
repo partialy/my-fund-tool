@@ -62,6 +62,8 @@
 - 后台展示所有账户的资产、累计收益、收益率、现金占比、持仓市值、持仓数、操作次数、最大回撤、日盈亏波动、集中度，以及已有持仓基金关注榜。
 - `src/services/adminAnalysisService.js` 负责后台聚合、风险指标、基金关注榜、DeepSeek 提示词和 AI 分析记录保存；路由层不能直接写聚合 SQL 或 AI 调用逻辑。
 - `POST /api/admin/ai-analysis` 手动生成并保存 AI 分析；`GET /api/admin/ai-analysis/latest` 读取最近一次分析。
+- `src/services/adminSqlService.js` 负责内网便捷 SQL 执行；`POST /api/admin/sql` 接收 JSON `{ "sql": "完整 SQLite SQL;" }`，使用 `db.exec(sql)` 原样执行，不自动包事务、不返回 `SELECT` rows。
+- `/api/admin/sql` 无登录、无鉴权、无 SQL 白名单，仅按当前内网便捷修账需求使用；需要事务时由调用方在 SQL 中自行写 `BEGIN IMMEDIATE; ... COMMIT;`。
 - AI 分析只读账本数据，不创建决策、订单、现金流水或行情数据；推荐范围优先限于本地已有基金和行情。
 - DeepSeek 使用 `deepseek-v4-pro`、`thinking: { type: 'enabled' }`、`reasoning_effort: 'high'`；未配置 `DEEPSEEK_API_KEY` 时后台数据可看，但生成分析应明确报错。
 - `ai_analysis_runs` 保存 AI 分析运行记录，包括状态、输入快照 JSON、提示词、模型名、响应正文、错误信息和时间。
